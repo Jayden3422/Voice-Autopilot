@@ -43,6 +43,21 @@
     border-radius: 8px;
   }
 
+  .chat-voice-bar {
+    display: flex;
+    align-items: center;
+    margin-top: 10px;
+    justify-content: flex-end;
+
+    .chat-voice-hint {
+      font-size: 12px;
+      color: $subtitle-color;
+      display: flex;
+      align-items: center;
+      margin-right: 12px;
+    }
+  }
+
   .chat-message-row {
     display: flex;
     margin: 8px 0;
