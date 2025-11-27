@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, date, time, timedelta
 import dateparser
-from models import CalendarCommand
+from .models import CalendarCommand
 
 _CN_MAP = {
   "零": 0, "〇": 0,
