@@ -6,6 +6,6 @@
 python 3.10
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented
+pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser
 ```
 
