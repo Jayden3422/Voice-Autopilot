@@ -16,7 +16,6 @@
 ```bash
 cd Frontend
 npm i
-npm run dev
 ```
 
 ### 后端
@@ -116,3 +115,68 @@ Backend/
   - 空闲：在 Calendar 中创建事件
   - 冲突：语音反馈“这个时间已有日程”，再等用户说新的时间，再创建
 
+## 运行
+
+前端：
+
+```bash
+cd Frontend
+npm run dev
+```
+
+后端：
+
+```bash
+cd Backend
+python main.py
+```
+
+打开前端地址：[voice-assistance](http://localhost:5173)
+
+点击”开始对话“
+
+![image-20251128155012810](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155012810.png)
+
+待开场白结束之后可以开始录制语音，录制结束之后点击“停止录音”
+
+![image-20251128155114969](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155114969.png)
+
+之后程序自动打开浏览器写入日程，成功之后返回语音：
+
+![image-20251128155220583](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155220583.png)
+
+如果是第一次登录请在自动打开的网页中登录账号，之后程序会自动检测是否登录成功。
+
+如果有日程冲突会返回冲突语音：
+
+![image-20251128155313223](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155313223.png)
+
+## 已知问题与限制
+
+### Google 登录流程需手动完成
+
+- 之后可以进行全流程模拟。
+
+### Playwright 会受网络波动影响
+
+- 网络延迟可能导致 Calendar 页面加载慢，届时可能需要调整等待时间或者根据界面加载元素确定是否登录成功。
+- 已做超时处理与错误提示，但仍可能受网络环境影响。
+
+### Whisper small 在 CPU 上速度有限
+
+- 如果电脑性能较弱，语音识别会稍微有延迟。
+- 可以通过切换到 `distil`, `tiny` 模型提升速度。
+
+### NLP 解析不等于人工智能识别
+
+- 有上下文限制以及识别限制，自己想出来的组合可能不全。
+- 之后可以接入 ChatGPT 等模型进行语义解析。
+
+### 日程设置只限于一天之内
+
+- 没有跨日的日程设置功能。
+- 已经预留接口拓展，之后需要修改 NLP 以及添加新写入函数。
+
+### 历史记录
+
+- 没有 logs ，预留 Record 界面。
