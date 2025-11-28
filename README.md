@@ -135,21 +135,21 @@ python main.py
 
 点击”开始对话“
 
-![image-20251128155012810](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155012810.png)
+![image-20251128155012810](assets/image-20251128155012810.png)
 
 待开场白结束之后可以开始录制语音，录制结束之后点击“停止录音”
 
-![image-20251128155114969](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155114969.png)
+![image-20251128155114969](assets/image-20251128155114969.png)
 
 之后程序自动打开浏览器写入日程，成功之后返回语音：
 
-![image-20251128155220583](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155220583.png)
+![image-20251128155220583](assets/image-20251128155220583.png)
 
 如果是第一次登录请在自动打开的网页中登录账号，之后程序会自动检测是否登录成功。
 
 如果有日程冲突会返回冲突语音：
 
-![image-20251128155313223](C:/Users/15613/AppData/Roaming/Typora/typora-user-images/image-20251128155313223.png)
+![image-20251128155313223](assets/image-20251128155313223.png)
 
 ## 已知问题与限制
 
