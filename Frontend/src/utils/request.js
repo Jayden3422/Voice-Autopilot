@@ -1,9 +1,10 @@
 import axios from "axios";
 const baseURL = process.env.NODE_ENV === "development" ? "/api" : "";
+import { message as AntMessage } from "antd";
 
 const instance = axios.create({
   baseURL,
-  timeout: 10000,
+  timeout: 100000,
   headers: {
     'X-Custom-Header': 'foobar'
   }
@@ -65,11 +66,11 @@ instance.interceptors.response.use(response => {
     }
   } else {
     if (JSON.stringify(error).includes('timeout')) {
-      Message.error('服务器响应超时，请刷新当前页')
+      AntMessage.error('服务器响应超时，请刷新当前页')
     }
     error.message = '连接服务器失败'
   }
-  Message.error(error.message)
+  AntMessage.error(error.message)
   return Promise.reject(error);
 });
 
