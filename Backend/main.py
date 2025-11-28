@@ -1,6 +1,7 @@
 import base64
 import os
 from datetime import datetime
+import asyncio
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -10,6 +11,7 @@ from tools.models import VoiceResponse
 from tools.file_utils import save_temp_file
 from tools.speech import transcribe_audio, synthesize_speech
 from tools.nlp import parse_calendar_command
+from tools.calendar_agent import GoogleCalendarAgent
 
 app = FastAPI(title="Voice Schedule Assistant")
 
@@ -56,7 +58,10 @@ async def handle_voice(audio: UploadFile = File(...)):
         audio_base64=audio_b64,
       )
     
-    ai_text = f"{cmd.date} 从 {cmd.start_time} 到 {cmd.end_time}：{cmd.title}"
+    # 日历 Agent
+    agent = GoogleCalendarAgent()
+    result = await asyncio.to_thread(agent.check_and_create_event, cmd)
+    ai_text = result.message
 
     # TTS
     audio_bytes = await synthesize_speech(ai_text)
