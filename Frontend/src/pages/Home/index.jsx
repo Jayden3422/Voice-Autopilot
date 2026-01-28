@@ -12,6 +12,7 @@ const Home = () => {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGreeting, setIsGreeting] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const mediaRecorderRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -142,7 +143,8 @@ const Home = () => {
           setMessages((prev) => [...prev, ...newMessages]);
         }
         if (audio_base64) {
-          playBase64Audio(audio_base64);
+          setIsPlaying(true);
+          playBase64Audio(audio_base64).finally(() => setIsPlaying(false));
         }
       })
       .catch((err) => {
@@ -206,31 +208,47 @@ const Home = () => {
           <div className="chat-subtitle">{t("home.subtitle")}</div>
         </div>
 
-        <div className="chat-messages">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`chat-message-row ${
-                msg.role === "ai" ? "ai-row" : "user-row"
-              }`}
-            >
+        <div className="chat-messages-wrapper">
+          <div className="chat-messages">
+            {messages.map((msg) => (
               <div
-                className={`chat-bubble ${
-                  msg.role === "ai" ? "ai-bubble" : "user-bubble"
+                key={msg.id}
+                className={`chat-message-row ${
+                  msg.role === "ai" ? "ai-row" : "user-row"
                 }`}
               >
-                <div className="chat-bubble-role">
-                  {msg.role === "ai" ? t("roles.ai") : t("roles.user")}
-                </div>
-                <div className="chat-bubble-text">
-                  {msg.text.split("\n").map((line, idx) => (
-                    <p key={idx}>{line}</p>
-                  ))}
+                <div
+                  className={`chat-bubble ${
+                    msg.role === "ai" ? "ai-bubble" : "user-bubble"
+                  }`}
+                >
+                  <div className="chat-bubble-role">
+                    {msg.role === "ai" ? t("roles.ai") : t("roles.user")}
+                  </div>
+                  <div className="chat-bubble-text">
+                    {msg.text.split("\n").map((line, idx) => (
+                      <p key={idx}>{line}</p>
+                    ))}
+                  </div>
                 </div>
               </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {(isProcessing || isGreeting || isPlaying || isRecording) && (
+            <div className="chat-anim-overlay">
+              {isProcessing ? (
+                <div className="anim-dots">
+                  <span /><span /><span /><span />
+                </div>
+              ) : (
+                <div className={`anim-wave ${isRecording ? "recording" : "playing"}`}>
+                  <span /><span /><span /><span /><span />
+                </div>
+              )}
             </div>
-          ))}
-          <div ref={messagesEndRef} />
+          )}
         </div>
 
         <div className="chat-voice-bar">
@@ -242,7 +260,7 @@ const Home = () => {
             danger={isRecording}
             onClick={isRecording ? handleStopRecording : handleStartRecording}
             loading={isProcessing}
-            disabled={isProcessing || isGreeting}
+            disabled={isProcessing || isGreeting || isPlaying}
           >
             {isRecording ? t("home.stopRecording") : t("home.startRecording")}
           </Button>
