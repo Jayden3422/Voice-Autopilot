@@ -6,11 +6,12 @@ import { useI18n } from "../../i18n/LanguageContext.jsx";
 import { ENABLE_BROWSER_TTS, TTS_MODE } from "../../config/tts.js";
 
 const Home = () => {
-  const { t, lang } = useI18n();
+  const { t, lang, setLangLocked } = useI18n();
   const [hasStarted, setHasStarted] = useState(false);
   const [messages, setMessages] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isGreeting, setIsGreeting] = useState(false);
   const mediaRecorderRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -26,6 +27,7 @@ const Home = () => {
 
   const handleStartConversation = () => {
     setHasStarted(true);
+    setLangLocked(true);
     const greeting = {
       id: Date.now(),
       role: "ai",
@@ -36,65 +38,78 @@ const Home = () => {
   };
 
   const speakWithBrowserTTS = (text) => {
-    if (!("speechSynthesis" in window)) return false;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = lang === "zh" ? "zh-CN" : "en-US";
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utterance);
-    return true;
+    if (!("speechSynthesis" in window)) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = lang === "zh" ? "zh-CN" : "en-US";
+      utterance.onend = () => resolve(true);
+      utterance.onerror = () => resolve(false);
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+    });
   };
 
   const requestBackendTTS = async (text) => {
     const res = await api.postAPI("/tts", { text, lang });
     const data = res && res.data ? res.data : res || {};
     if (data.audio_base64) {
-      playBase64Audio(data.audio_base64);
+      await playBase64Audio(data.audio_base64);
       return true;
     }
     return false;
   };
 
   const playGreetingSpeech = async (text) => {
-    if (TTS_MODE === "browser") {
-      speakWithBrowserTTS(text);
-      return;
-    }
-    if (TTS_MODE === "backend") {
-      try {
-        await requestBackendTTS(text);
-      } catch (err) {
-        console.error("Backend TTS failed:", err);
+    setIsGreeting(true);
+    try {
+      if (TTS_MODE === "browser") {
+        await speakWithBrowserTTS(text);
+        return;
       }
-      return;
-    }
-    if (TTS_MODE === "auto") {
-      try {
-        const ok = await requestBackendTTS(text);
-        if (ok) return;
-      } catch (err) {
-        console.error("Backend TTS failed:", err);
+      if (TTS_MODE === "backend") {
+        try {
+          await requestBackendTTS(text);
+        } catch (err) {
+          console.error("Backend TTS failed:", err);
+        }
+        return;
       }
-      if (ENABLE_BROWSER_TTS) {
-        speakWithBrowserTTS(text);
+      if (TTS_MODE === "auto") {
+        try {
+          const ok = await requestBackendTTS(text);
+          if (ok) return;
+        } catch (err) {
+          console.error("Backend TTS failed:", err);
+        }
+        if (ENABLE_BROWSER_TTS) {
+          await speakWithBrowserTTS(text);
+        }
       }
+    } finally {
+      setIsGreeting(false);
     }
   };
 
   const playBase64Audio = (base64, mimeType = "audio/wav") => {
-    try {
-      const byteString = atob(base64);
-      const ab = new ArrayBuffer(byteString.length);
-      const ia = new Uint8Array(ab);
-      for (let i = 0; i < byteString.length; i += 1) {
-        ia[i] = byteString.charCodeAt(i);
+    return new Promise((resolve) => {
+      try {
+        const byteString = atob(base64);
+        const ab = new ArrayBuffer(byteString.length);
+        const ia = new Uint8Array(ab);
+        for (let i = 0; i < byteString.length; i += 1) {
+          ia[i] = byteString.charCodeAt(i);
+        }
+        const blob = new Blob([ab], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.onended = () => resolve();
+        audio.onerror = () => resolve();
+        audio.play();
+      } catch (err) {
+        console.error(`${t("errors.playAiAudio")}:`, err);
+        resolve();
       }
-      const blob = new Blob([ab], { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.play();
-    } catch (err) {
-      console.error(`${t("errors.playAiAudio")}:`, err);
-    }
+    });
   };
 
   const sendAudioToBackend = async (blob) => {
@@ -227,7 +242,7 @@ const Home = () => {
             danger={isRecording}
             onClick={isRecording ? handleStopRecording : handleStartRecording}
             loading={isProcessing}
-            disabled={isProcessing}
+            disabled={isProcessing || isGreeting}
           >
             {isRecording ? t("home.stopRecording") : t("home.startRecording")}
           </Button>

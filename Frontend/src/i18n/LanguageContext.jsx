@@ -11,8 +11,7 @@ const normalizeLang = (value) => (value === "en" ? "en" : "zh");
 const getInitialLang = () => {
   const saved = window.localStorage.getItem("lang");
   if (saved) return normalizeLang(saved);
-  const browserLang = navigator.language || "";
-  return browserLang.toLowerCase().startsWith("zh") ? "zh" : "en";
+  return "en";
 };
 
 const resolveKey = (obj, key) => {
@@ -27,6 +26,7 @@ const resolveKey = (obj, key) => {
 
 export const LanguageProvider = ({ children }) => {
   const [lang, setLang] = useState(getInitialLang);
+  const [langLocked, setLangLocked] = useState(false);
 
   useEffect(() => {
     window.localStorage.setItem("lang", lang);
@@ -48,8 +48,10 @@ export const LanguageProvider = ({ children }) => {
       setLang,
       toggleLang: () => setLang((prev) => (prev === "zh" ? "en" : "zh")),
       t,
+      langLocked,
+      setLangLocked,
     };
-  }, [lang, t]);
+  }, [lang, t, langLocked]);
 
   return (
     <LanguageContext.Provider value={value}>
