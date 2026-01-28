@@ -4,7 +4,7 @@ from edge_tts.exceptions import NoAudioReceived, WebSocketError, UnexpectedRespo
 import asyncio
 import os
 from opencc import OpenCC
-cc = OpenCC('t2s') # ç¹ä½“è½¬ç®€ä½“
+cc = OpenCC('t2s') # 繁体转简体
 
 # STT
 _model = WhisperModel(
@@ -20,12 +20,12 @@ def _normalize_lang(lang: str) -> str:
   return "en" if lang.startswith("en") else "zh"
 
 def transcribe_audio(path: str, lang: str = "zh") -> str:
-  # éŸ³é¢‘è½¬æ–‡æœ¬
+  # 音频转文本
   normalized = _normalize_lang(lang)
   segments, _ = _model.transcribe(path, language=normalized)
   text = "".join(seg.text for seg in segments)
   if normalized == "zh":
-    text = cc.convert(text)  # ç¹ä½“è½¬ç®€ä½“
+    text = cc.convert(text)  # 繁体转简体
   return text.strip()
 
 # TTS
@@ -44,7 +44,7 @@ CONNECT_TIMEOUT = int(os.getenv("EDGE_TTS_CONNECT_TIMEOUT", "10"))
 RECEIVE_TIMEOUT = int(os.getenv("EDGE_TTS_RECEIVE_TIMEOUT", "60"))
 
 async def synthesize_speech(text: str, lang: str = "zh") -> bytes:
-  # è¯­éŸ³ï¼ˆäºŒè¿›åˆ¶ wavï¼‰
+  # 语音（二进制 wav）
   normalized = _normalize_lang(lang)
   primary_voice = VOICE_BY_LANG.get(normalized, VOICE_NAME)
   voices = [primary_voice] + [v for v in VOICE_FALLBACKS.get(normalized, []) if v != primary_voice]

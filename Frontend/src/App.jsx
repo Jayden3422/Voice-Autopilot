@@ -5,7 +5,7 @@ import { useI18n } from "./i18n/LanguageContext.jsx";
 
 const App = () => {
   const location = useLocation();
-  const { t, toggleLang, lang } = useI18n();
+  const { t, toggleLang, lang, langLocked } = useI18n();
 
   const items = routes
     .filter(r => r.labelKey)
@@ -24,14 +24,16 @@ const App = () => {
             selectedKeys={[location.pathname]}
           />
         </div>
-        <Button
-          className="lang-toggle"
-          type="default"
-          onClick={toggleLang}
-          aria-label={`switch language to ${lang === "zh" ? "English" : "Chinese"}`}
-        >
-          {t("nav.switchTo")}
-        </Button>
+        {!langLocked && (
+          <Button
+            className="lang-toggle"
+            type="default"
+            onClick={toggleLang}
+            aria-label={`switch language to ${lang === "zh" ? "English" : "Chinese"}`}
+          >
+            {t("nav.switchTo")}
+          </Button>
+        )}
       </header>
 
       <main className="content">
