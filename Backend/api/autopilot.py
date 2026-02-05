@@ -186,9 +186,12 @@ async def _transcribe_audio(audio_b64: str) -> str:
 def _enrich_actions(actions: list[dict], extracted: dict, draft: dict) -> list[dict]:
     """
     Post-process actions: fill in missing payload fields from extracted data,
-    and drop actions that have no viable data.
+    resolve relative dates/times, and drop actions that have no viable data.
     """
     from datetime import datetime, timedelta
+    from utils.timezone import now as now_toronto
+
+    current_dt = now_toronto()
 
     summary = extracted.get("summary", "")
     intent = extracted.get("intent", "")
@@ -225,11 +228,18 @@ def _enrich_actions(actions: list[dict], extracted: dict, draft: dict) -> list[d
                 payload["title"] = summary[:80] if summary else "Meeting"
             if not payload.get("date"):
                 # Default to tomorrow
-                payload["date"] = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+                payload["date"] = (current_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+            else:
+                # Validate / resolve existing date (GPT may return relative string)
+                payload["date"] = _resolve_date(payload["date"], current_dt, lang)
             if not payload.get("start_time"):
                 payload["start_time"] = "10:00"
+            else:
+                payload["start_time"] = _resolve_time(payload["start_time"])
             if not payload.get("end_time"):
                 payload["end_time"] = "11:00"
+            else:
+                payload["end_time"] = _resolve_time(payload["end_time"])
             if "attendees" not in payload:
                 payload["attendees"] = []
 
@@ -267,6 +277,55 @@ def _enrich_actions(actions: list[dict], extracted: dict, draft: dict) -> list[d
         enriched.append(a)
 
     return enriched
+
+
+def _resolve_date(value: str, ref_dt, lang: str = "en") -> str:
+    """Ensure a date value is in YYYY-MM-DD format. GPT resolves via prompt-injected datetime."""
+    from datetime import datetime
+    if not value:
+        return ref_dt.strftime("%Y-%m-%d")
+    # Already ISO
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return value
+    except ValueError:
+        pass
+    # Lightweight dateparser fallback (no keyword NLP)
+    try:
+        import dateparser
+        dt = dateparser.parse(value, settings={
+            "PREFER_DATES_FROM": "future",
+            "RELATIVE_BASE": ref_dt.replace(tzinfo=None),
+        })
+        if dt:
+            return dt.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    return value
+
+
+def _resolve_time(value: str) -> str:
+    """Ensure a time value is in HH:MM 24-hour format."""
+    from datetime import datetime
+    if not value:
+        return ""
+    try:
+        datetime.strptime(value, "%H:%M")
+        return value
+    except ValueError:
+        pass
+    try:
+        t = datetime.strptime(value, "%H:%M:%S")
+        return t.strftime("%H:%M")
+    except ValueError:
+        pass
+    for fmt in ("%I:%M %p", "%I:%M%p", "%I %p", "%I%p"):
+        try:
+            t = datetime.strptime(value.strip(), fmt)
+            return t.strftime("%H:%M")
+        except ValueError:
+            continue
+    return value
 
 
 def _build_rag_query(extracted: dict) -> str:

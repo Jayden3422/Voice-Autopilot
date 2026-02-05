@@ -4,8 +4,10 @@
 
 一个 **语音驱动的智能日程 Web 应用**，集成 **销售/支持自动驾驶（Autopilot）** 系统。
 
-- **语音日程**：说话 → Whisper STT → NLP → Playwright 自动化 Google Calendar。
+- **语音日程**：说话 → Whisper STT → **GPT 槽位提取**（日期/时间/标题） → Playwright 自动化 Google Calendar。
 - **Autopilot**：对话 → OpenAI Tool Calling 结构化提取 → RAG 知识库检索 → 回复草稿 → 动作（日历 / Slack / 邮件 / 工单） → 人工确认 → 执行 → 审计日志。
+
+> **说明：** 原先基于正则/关键词匹配的 NLP 解析器（`tools/nlp.py`）已**注释掉**。现在所有日期/时间/标题提取均由 OpenAI Tool Calling 完成，系统会将当前多伦多时间注入 prompt，使模型能自然理解"明天"、"下周二"、"后天"、"next Tuesday"等中英文相对时间表达。
 
 ## 环境配置
 
@@ -23,7 +25,7 @@ npm i
 `Python` 3.10.11
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio
+pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio tzdata
 ```
 
 安装浏览器（用于日历自动化）：
@@ -48,6 +50,7 @@ cp .env.example .env
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-5-mini              # 或 gpt-4.1-mini、gpt-4o 等
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+TIMEZONE=America/Toronto             # 默认时区，用于日期解析
 ```
 
 可选项（启用对应的动作连接器）：
@@ -78,9 +81,13 @@ Backend/
   api/
     autopilot.py          # Autopilot API 路由 + 动作数据补全
   chat/
+    calendar_extractor.py # GPT 日历槽位提取（日期/时间/标题）
     autopilot_extractor.py # OpenAI Tool Calling 提取 + 修复重试
     reply_drafter.py      # 带引用的回复草稿生成
-    prompt/               # 提取与生成的 system prompt
+    prompt/
+      calendar_extraction.txt   # 日历提取 prompt（含 {current_datetime}）
+      autopilot_extraction.txt  # Autopilot 提取 prompt（含 {current_datetime}）
+      autopilot_reply_draft.txt # 回复草稿 prompt
   rag/
     ingest.py             # 知识库 → 分块 → 嵌入 → FAISS 索引
     retrieve.py           # FAISS 向量检索（带缓存）
@@ -94,10 +101,13 @@ Backend/
     db.py                 # SQLite 初始化（autopilot.db）
     runs.py               # 审计日志 CRUD + 缓存
   business/
-    autopilot_schema.json # 严格 JSON Schema（提取输出结构）
+    calendar_schema.json  # 日历槽位提取 JSON Schema
+    autopilot_schema.json # Autopilot 提取 JSON Schema
+  utils/
+    timezone.py           # 项目时区配置（默认 America/Toronto）
   tools/
     speech.py             # Whisper STT + Edge TTS
-    nlp.py                # NLP 日期/时间解析（中英文）
+    nlp.py                # 正则 NLP 解析器（已注释——已被 AI 替代）
     calendar_agent.py     # Playwright Google Calendar 自动化
     file_utils.py         # 临时文件工具
     models.py             # 数据模型（CalendarCommand 等）
@@ -128,8 +138,9 @@ knowledge_base/           # RAG 用 Markdown 文档（含 10 篇示例）
   - Whisper `small`，`device="cpu"`，`compute_type="int8"`
   - OpenCC `t2s` 简繁转换
   - TTS 使用 `edge_tts`，中英音色 + 自动 fallback
-- **NLP 解析**：`tools/nlp.py`
-  - 中英文日期/时间解析
+- **日历提取**：`chat/calendar_extractor.py`
+  - GPT Tool Calling + 多伦多当前时间注入
+  - 替代旧版正则 NLP（`tools/nlp.py`，已注释）
 - **Google Calendar Agent**：`tools/calendar_agent.py`
   - Playwright + 本地 Chrome
   - `chrome_profile` 持久化登录态
@@ -158,13 +169,17 @@ python main.py
 
 ### 1. 中英双语支持
 
-覆盖 UI、日志、报错、NLP 解析、Autopilot 输出。
+覆盖 UI、日志、报错、AI 提取、Autopilot 输出。
 
-### 2. 语音日程
+### 2. 语音日程（AI 驱动）
 
 - 在 Home 页面点击 **开始语音对话**
-- 说出日程请求（如"明天上午十点到十一点和 CEO 开会"）
-- 系统解析、检测冲突、创建 Google Calendar 事件
+- 支持中英文自然表达：
+  - 相对日期："明天"、"后天"、"下周三"、"next Tuesday"
+  - 明确日期："2月10号"、"Feb 10"
+  - 自然时间："下午两点到三点"、"2pm to 3pm"
+- GPT 通过 Tool Calling 提取日期/时间/标题（当前多伦多时间注入 prompt）
+- 系统检测冲突、创建 Google Calendar 事件
 
 ![image-20260127235511409](assets/image-20260127235511409.png)
 

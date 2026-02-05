@@ -9,6 +9,80 @@ def _normalize_lang(lang: str) -> str:
   lang = lang.lower()
   return "en" if lang.startswith("en") else "zh"
 
+# ── Weekday maps ──
+
+_ZH_WEEKDAY_MAP = {
+  "一": 0, "二": 1, "三": 2, "四": 3,
+  "五": 4, "六": 5, "日": 6, "天": 6,
+}
+
+_EN_WEEKDAY_MAP = {
+  "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+  "friday": 4, "saturday": 5, "sunday": 6,
+  "mon": 0, "tue": 1, "tues": 1, "wed": 2, "thu": 3,
+  "thur": 3, "thurs": 3, "fri": 4, "sat": 5, "sun": 6,
+}
+
+
+def _next_weekday(today: date, target_wd: int) -> date:
+  """Return the next occurrence of *target_wd* (Mon=0) strictly after *today*."""
+  days = (target_wd - today.weekday()) % 7
+  if days == 0:
+    days = 7
+  return today + timedelta(days=days)
+
+
+def parse_weekday_zh(text: str, now: datetime) -> date | None:
+  """Parse 周X / 星期X / 下周X / 下星期X / 这周X / 这星期X → date."""
+  m = re.search(r"(下|这)?(周|星期)([一二三四五六日天])", text)
+  if not m:
+    return None
+  prefix = m.group(1)      # 下 / 这 / None
+  wd_char = m.group(3)
+  target_wd = _ZH_WEEKDAY_MAP.get(wd_char)
+  if target_wd is None:
+    return None
+  today = now.date()
+  cur_wd = today.weekday()
+
+  if prefix == "下":
+    # 下周X：下周一开始的那一周里的 X
+    days_to_next_mon = (7 - cur_wd) % 7 or 7
+    return today + timedelta(days=days_to_next_mon + target_wd)
+  elif prefix == "这":
+    # 这周X：本周（可能已过）
+    return today + timedelta(days=target_wd - cur_wd)
+  else:
+    # 周X / 星期X：最近的下一个（如果今天就是则取下周）
+    return _next_weekday(today, target_wd)
+
+
+def parse_weekday_en(text: str, now: datetime) -> date | None:
+  """Parse 'next Tuesday', 'this Wednesday', 'Tuesday' → date."""
+  text_l = text.strip().lower()
+  m = re.search(
+    r"\b(next|this)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday"
+    r"|mon|tues?|wed|thur?s?|fri|sat|sun)\b",
+    text_l,
+  )
+  if not m:
+    return None
+  prefix = m.group(1)       # next / this / None
+  day_word = m.group(2)
+  target_wd = _EN_WEEKDAY_MAP.get(day_word)
+  if target_wd is None:
+    return None
+  today = now.date()
+  cur_wd = today.weekday()
+
+  if prefix == "next":
+    days_to_next_mon = (7 - cur_wd) % 7 or 7
+    return today + timedelta(days=days_to_next_mon + target_wd)
+  elif prefix == "this":
+    return today + timedelta(days=target_wd - cur_wd)
+  else:
+    return _next_weekday(today, target_wd)
+
 _CN_MAP = {
   "零": 0, "〇": 0,
   "一": 1,
@@ -174,6 +248,7 @@ def extract_date_expr(text: str) -> str:
   patterns = [
     r"(今天|明天|后天|明早|大后天)",
     r"([0-9一二两三四五六七八九十〇零]{1,3}天(?:后|之后))",
+    r"((?:下|这)(?:周|星期)[一二三四五六日天])",    # 下周三 / 这星期五
     r"(星期[一二三四五六日天])",
     r"(周[一二三四五六日天])",
     r"(\d{1,2}月\d{1,2}号?)",
@@ -188,7 +263,8 @@ def extract_date_expr(text: str) -> str:
 def extract_date_expr_en(text: str) -> str:
   patterns = [
     r"\b(today|tomorrow|day after tomorrow)\b",
-    r"\b(next\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+    r"\b(next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
+    r"\b(this\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b",
     r"\b(mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(day)?\b",
     r"\b(\d{1,2}/\d{1,2}(?:/\d{2,4})?)\b",
     r"\b(\d{4}-\d{1,2}-\d{1,2})\b",
@@ -209,6 +285,11 @@ def extract_date(text: str, now: datetime) -> date:
   if d:
     return d
 
+  # Weekday patterns: 下周三 / 这星期五 / 周二 / 星期日
+  d_wd = parse_weekday_zh(text, now)
+  if d_wd:
+    return d_wd
+
   date_expr = extract_date_expr(text)
   if date_expr:
     d2 = parse_explicit_date(date_expr, now)
@@ -218,6 +299,11 @@ def extract_date(text: str, now: datetime) -> date:
   return now.date()
 
 def extract_date_en(text: str, now: datetime) -> date:
+  # Weekday patterns: next Tuesday / this Wednesday / Tuesday
+  d_wd = parse_weekday_en(text, now)
+  if d_wd:
+    return d_wd
+
   date_expr = extract_date_expr_en(text)
   if date_expr:
     d = parse_date_en(date_expr, now)
@@ -445,7 +531,9 @@ def extract_title_en(text: str, date_expr: str, time_expr: str) -> str:
   return t or "Schedule"
 
 def parse_calendar_command(raw_text: str, now: datetime | None = None, lang: str = "zh") -> CalendarCommand:
-  now = now or datetime.now()
+  if now is None:
+    from utils.timezone import now as _now_toronto
+    now = _now_toronto()
   normalized_lang = _normalize_lang(lang)
 
   if normalized_lang == "en":

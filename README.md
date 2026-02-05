@@ -4,8 +4,10 @@
 
 A **voice-first smart scheduling web app** with an integrated **Sales/Support Autopilot** system.
 
-- **Voice Scheduling**: Speak → Whisper STT → NLP → Playwright automates Google Calendar.
+- **Voice Scheduling**: Speak → Whisper STT → **GPT slot extraction** (date/time/title) → Playwright automates Google Calendar.
 - **Autopilot**: Conversation → OpenAI Tool Calling extraction → RAG retrieval → Reply draft → Actions (Calendar / Slack / Email / Ticket) → Human confirmation → Execute → Audit log.
+
+> **Note:** The original regex/keyword-based NLP parser (`tools/nlp.py`) has been **commented out**. All date/time/title extraction is now handled by OpenAI Tool Calling with the current Toronto datetime injected into the system prompt, enabling natural understanding of relative expressions like "tomorrow", "next Tuesday", "下周三", "后天", etc.
 
 ## Environment Setup
 
@@ -23,7 +25,7 @@ npm i
 `Python` 3.10.11
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio
+pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio tzdata
 ```
 
 Install browser (for Calendar automation):
@@ -48,6 +50,7 @@ Required:
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-5-mini              # or gpt-4.1-mini, gpt-4o, etc.
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+TIMEZONE=America/Toronto             # default timezone for date resolution
 ```
 
 Optional (enable specific action connectors):
@@ -78,9 +81,13 @@ Backend/
   api/
     autopilot.py          # Autopilot API routes + action enrichment
   chat/
+    calendar_extractor.py # GPT-based calendar slot extraction (date/time/title)
     autopilot_extractor.py # OpenAI Tool Calling extraction + repair pass
     reply_drafter.py      # Reply draft generation with citations
-    prompt/               # System prompts for extraction & drafting
+    prompt/
+      calendar_extraction.txt   # Calendar extraction prompt (with {current_datetime})
+      autopilot_extraction.txt  # Autopilot extraction prompt (with {current_datetime})
+      autopilot_reply_draft.txt # Reply drafting prompt
   rag/
     ingest.py             # Knowledge base → chunk → embed → FAISS index
     retrieve.py           # FAISS vector search with caching
@@ -94,10 +101,13 @@ Backend/
     db.py                 # SQLite init (autopilot.db)
     runs.py               # Audit log CRUD + cache helpers
   business/
-    autopilot_schema.json # Strict JSON Schema for extraction output
+    calendar_schema.json  # JSON Schema for calendar slot extraction
+    autopilot_schema.json # Strict JSON Schema for autopilot extraction
+  utils/
+    timezone.py           # Project timezone (default: America/Toronto)
   tools/
     speech.py             # Whisper STT + Edge TTS
-    nlp.py                # NLP date/time parsing (zh/en)
+    nlp.py                # Regex NLP parser (commented out — replaced by AI)
     calendar_agent.py     # Playwright Google Calendar automation
     file_utils.py         # Temp file helpers
     models.py             # Data models (CalendarCommand, etc.)
@@ -128,8 +138,9 @@ knowledge_base/           # Markdown docs for RAG (10 included)
   - Whisper `small`, `device="cpu"`, `compute_type="int8"`
   - OpenCC `t2s` for Traditional → Simplified conversion
   - TTS via `edge_tts` with bilingual voices + fallback
-- **NLP**: `tools/nlp.py`
-  - English and Chinese date/time parsing
+- **Calendar Extraction**: `chat/calendar_extractor.py`
+  - GPT Tool Calling with Toronto datetime injection
+  - Replaces the old regex NLP (`tools/nlp.py`, now commented out)
 - **Google Calendar Agent**: `tools/calendar_agent.py`
   - Playwright + local Chrome
   - Persistent login via `chrome_profile`
@@ -158,13 +169,17 @@ Open: `http://localhost:5173`
 
 ### 1. Bilingual Support (Chinese/English)
 
-Across UI, logs, errors, NLP parsing, and Autopilot output.
+Across UI, logs, errors, AI extraction, and Autopilot output.
 
-### 2. Voice Scheduling
+### 2. Voice Scheduling (AI-powered)
 
 - Click **Start Voice Conversation** on the Home page
-- Speak a scheduling request (e.g. "tomorrow 10–11am meeting with CEO")
-- System parses, checks conflicts, creates Google Calendar event
+- Speak a scheduling request in Chinese or English:
+  - Relative dates: "tomorrow", "next Tuesday", "明天", "下周三", "后天"
+  - Explicit dates: "Feb 10", "2月10号"
+  - Natural times: "2pm to 3pm", "下午两点到三点"
+- GPT extracts date/time/title via Tool Calling (current Toronto time injected into prompt)
+- System checks conflicts and creates Google Calendar event
 
 ![image-20260127235511409](assets/image-20260127235511409.png)
 
