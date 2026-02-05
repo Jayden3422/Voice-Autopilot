@@ -2,11 +2,10 @@
 
 [中文 README](README_zh.md)
 
-Voice-driven schedule assistant (Google Calendar automation).
+A **voice-first smart scheduling web app** with an integrated **Sales/Support Autopilot** system.
 
-This project is a **voice-first smart scheduling web app**:
-- The user clicks **Start Voice Conversation** in the frontend.
-- Audio is transcribed → parsed into a calendar command → Playwright automates Google Calendar to create the event.
+- **Voice Scheduling**: Speak → Whisper STT → NLP → Playwright automates Google Calendar.
+- **Autopilot**: Conversation → OpenAI Tool Calling extraction → RAG retrieval → Reply draft → Actions (Calendar / Slack / Email / Ticket) → Human confirmation → Execute → Audit log.
 
 ## Environment Setup
 
@@ -24,10 +23,10 @@ npm i
 `Python` 3.10.11
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright
+pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio
 ```
 
-Install browser:
+Install browser (for Calendar automation):
 
 ```bash
 python -m playwright install chromium
@@ -35,43 +34,96 @@ python -m playwright install chromium
 
 Then move `chrome-win` into `Backend\tools`.
 
+### Configuration
+
+Copy `.env.example` to `.env` at the project root and fill in your keys:
+
+```bash
+cp .env.example .env
+```
+
+Required:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-5-mini              # or gpt-4.1-mini, gpt-4o, etc.
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+```
+
+Optional (enable specific action connectors):
+
+```env
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+LINEAR_API_KEY=lin_api_...
+LINEAR_TEAM_ID=
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=your@email.com
+SMTP_PASS=your-app-password
+```
+
 ## Overview
 
 ```
 Frontend/
   src/
-    pages/Home/         # Voice conversation page
-    utils/              # Axios wrapper
-    router/             # React Router
-    styles/             # Global SCSS variables
+    pages/Home/           # Voice conversation page
+    pages/Autopilot/      # Sales/Support Autopilot page
+    utils/                # Axios wrapper
+    router/               # React Router
+    styles/               # Global SCSS variables
+    i18n/                 # Bilingual translations (zh/en)
 Backend/
-  main.py               # FastAPI entry
+  main.py                 # FastAPI entry + dotenv loading
+  api/
+    autopilot.py          # Autopilot API routes + action enrichment
+  chat/
+    autopilot_extractor.py # OpenAI Tool Calling extraction + repair pass
+    reply_drafter.py      # Reply draft generation with citations
+    prompt/               # System prompts for extraction & drafting
+  rag/
+    ingest.py             # Knowledge base → chunk → embed → FAISS index
+    retrieve.py           # FAISS vector search with caching
+  connectors/
+    slack.py              # Slack Incoming Webhook
+    linear.py             # Linear GraphQL issue creation
+    email_connector.py    # SMTP email
+  actions/
+    dispatcher.py         # Unified action routing (dry_run / execute)
+  store/
+    db.py                 # SQLite init (autopilot.db)
+    runs.py               # Audit log CRUD + cache helpers
+  business/
+    autopilot_schema.json # Strict JSON Schema for extraction output
   tools/
-    speech.py           # Whisper STT + TTS
-    nlp.py              # NLP for schedule parsing
-    calendar_agent.py   # Playwright automation
-    file_utils.py       # Temp file helpers
-    models.py           # Data models
-    chrome_profile/     # Persistent login profile
-    chrome-win/         # Portable Chrome
+    speech.py             # Whisper STT + Edge TTS
+    nlp.py                # NLP date/time parsing (zh/en)
+    calendar_agent.py     # Playwright Google Calendar automation
+    file_utils.py         # Temp file helpers
+    models.py             # Data models (CalendarCommand, etc.)
+  tests/
+    test_autopilot.py     # 12 tests (schema, RAG, connectors, SQLite)
+knowledge_base/           # Markdown docs for RAG (10 included)
 ```
 
-### Frontend (React + Vite + AntD)
+### Frontend (React 19 + Vite 7 + AntD 6)
 
 - **Entry**: `main.jsx`
 - **Routing**: `App.jsx` + `router/routes.jsx`
 - **Home page**: `pages/Home/index.jsx`
+- **Autopilot page**: `pages/Autopilot/index.jsx`
 - **HTTP wrapper**:
   - `request.js`: axios instance + interceptors + error handling
   - `http.js`: `get/post/put/delete`
   - `api.js`: e.g. `postAPI("/voice", formData)`
-- **Vite proxy**: `vite.config.js`
+- **Vite proxy**: `vite.config.js` (`/api` → `http://localhost:8000`)
 - **Global styles**: `src/styles/variables.scss`
 
-### Backend (FastAPI + Whisper + Edge TTS + Playwright)
+### Backend (FastAPI + Whisper + Edge TTS + Playwright + OpenAI)
 
 - **Entry**: `Backend/main.py`
   - FastAPI app + CORS (allows `http://localhost:5173`)
+  - Loads `.env` via `python-dotenv`
 - **Speech**: `tools/speech.py`
   - Whisper `small`, `device="cpu"`, `compute_type="int8"`
   - OpenCC `t2s` for Traditional → Simplified conversion
@@ -81,48 +133,8 @@ Backend/
 - **Google Calendar Agent**: `tools/calendar_agent.py`
   - Playwright + local Chrome
   - Persistent login via `chrome_profile`
-  - Compatible with EN/ZH time labels (e.g., "10am to 11am", "下午10点 - 下午11点")
+  - Conflict detection
 - **Models**: `tools/models.py`
-
-## Key Features
-
-### 1. Frontend
-
-#### Bilingual support(Chinese/English)
-
-across UI, logs, errors, and NLP parsing
-
-#### Waiting Animation
-
-![image-20260127235511409](assets/image-20260127235511409.png)
-
-![image-20260127235406224](assets/image-20260127235406224.png)
-
-![image-20260127235446020](assets/image-20260127235446020.png)
-
-### 2. Voice Interaction Flow
-
-- Click button to start a voice conversation
-- Backend acts as a voice assistant
-- First response is a fixed greeting
-- User speaks, system parses and replies
-
-### 3. Google Calendar Automation
-
-- Browser automation via Playwright
-- Backend opens Calendar and creates events
-
-### 4. Login & Session Persistence
-
-- No Google Calendar API; UI automation only
-- First run: real browser opens for login + MFA
-- Session is persisted and reused
-
-### 5. Conflict Detection & Creation
-
-- Extract date/time from speech
-- If conflict exists: respond with a conflict message
-- Otherwise: create the event
 
 ## Run
 
@@ -142,53 +154,124 @@ python main.py
 
 Open: `http://localhost:5173`
 
-Click **Start Voice Conversation**.
+## Key Features
 
-![image-20251128155012810](assets/image-20251128155012810.png)
+### 1. Bilingual Support (Chinese/English)
 
-After the greeting, start recording and click **Stop Recording** when done.
+Across UI, logs, errors, NLP parsing, and Autopilot output.
 
-![image-20251128155114969](assets/image-20251128155114969.png)
+### 2. Voice Scheduling
 
-The app will open the browser and create the event:
+- Click **Start Voice Conversation** on the Home page
+- Speak a scheduling request (e.g. "tomorrow 10–11am meeting with CEO")
+- System parses, checks conflicts, creates Google Calendar event
 
-![image-20251128155220583](assets/image-20251128155220583.png)
+![image-20260127235511409](assets/image-20260127235511409.png)
 
-If it's your first login, complete the login in the opened browser window.
+In `Slack`:
 
-If there is a conflict, it returns a conflict response:
+![image-20260205011401548](assets/image-20260205011401548.png)
 
-![image-20251128155313223](assets/image-20251128155313223.png)
+### 3. Google Calendar Automation
+
+- Browser automation via Playwright (no API keys needed)
+- Persistent login session (first run requires manual Google login + MFA)
+- Automatic conflict detection
+
+### 4. Sales/Support Autopilot
+
+Navigate to `http://localhost:5173/autopilot`
+
+![image-20260205010238306](assets/image-20260205010238306.png)
+
+**Full pipeline**:
+
+```
+Input (text/voice) → Whisper STT → OpenAI Tool Calling (structured extraction)
+  → RAG knowledge base retrieval → Reply draft with citations
+  → Action Plan → Human confirmation → Execute → Audit log
+```
+
+#### How It Works
+
+1. **Input**: Paste conversation text or record audio
+2. **AI Extraction**: OpenAI extracts intent, urgency, budget, entities, and suggests next-best-actions (strict JSON Schema with repair pass)
+3. **Knowledge Base**: RAG retrieves relevant FAQ/product docs as evidence
+4. **Reply Draft**: AI generates a professional reply with citations — never fabricates
+5. **Action Enrichment**: Payloads are auto-populated from extracted data:
+   - `create_meeting` — title from summary, date/time from conversation or defaults
+   - `send_slack_summary` — message built from intent + urgency + company + summary
+   - `send_email_followup` — only if email address is available; body from reply draft
+   - `create_ticket` — title/description from summary, priority from urgency
+6. **Confirm & Execute**: Preview all actions, edit payloads, check/uncheck, then confirm
+
+#### Autopilot API
+
+| Endpoint | Description |
+|---|---|
+| `POST /autopilot/run` | Analyze conversation (audio or text). Returns `run_id`, transcript, extracted JSON, evidence, reply draft, action previews. |
+| `POST /autopilot/confirm` | Execute confirmed actions. Returns per-action status and results (URLs, summaries). |
+| `POST /autopilot/ingest` | Re-index the knowledge base into the FAISS vector store. |
+
+**Example request** (`/autopilot/run`):
+
+```json
+{
+  "mode": "text",
+  "text": "Hi, I'm John from Acme Corp. We need your voice assistant for our sales team. Budget is around $5000/month. Can we schedule a demo next Tuesday at 2pm?",
+  "locale": "en"
+}
+```
+
+**Example response** (abbreviated):
+
+```json
+{
+  "run_id": "a1b2c3d4-...",
+  "transcript": "Hi, I'm John from Acme Corp...",
+  "extracted": {
+    "intent": "sales_lead",
+    "urgency": "medium",
+    "budget": { "currency": "USD", "range_min": 5000, "range_max": 5000, "confidence": 0.9 },
+    "entities": { "company": "Acme Corp", "contact_name": "John" },
+    "summary": "Sales lead from Acme Corp requesting demo, $5K/mo budget.",
+    "next_best_actions": [
+      { "action_type": "create_meeting", "confidence": 0.95, "payload": { "title": "Demo with Acme Corp", "date": "2026-02-10", "start_time": "14:00", "end_time": "15:00" } },
+      { "action_type": "send_slack_summary", "confidence": 0.85, "payload": { "message": "Intent: sales lead\nCompany: Acme Corp\n..." } }
+    ]
+  },
+  "evidence": [{ "doc": "02_pricing.md", "chunk": 1, "score": 0.82, "text": "..." }],
+  "reply_draft": { "text": "Hi John, thanks for reaching out...", "citations": ["02_pricing.md#1"] },
+  "actions_preview": [{ "action_type": "create_meeting", "preview": "Calendar: Demo with Acme Corp on 2026-02-10 from 14:00 to 15:00" }]
+}
+```
+
+#### Knowledge Base
+
+Place `.md` files in the `knowledge_base/` directory. 10 sample docs are included covering product overview, pricing, FAQ, support policy, API reference, onboarding, and security.
+
+To (re)index: `POST /autopilot/ingest`
+
+#### Audit Log
+
+All runs are stored in `Backend/autopilot.db` (SQLite) with full traceability: input → transcript → extraction → evidence → draft → actions → execution status → errors.
+
+#### Running Tests
+
+```bash
+cd Backend
+python -m pytest tests/test_autopilot.py -v
+```
+
+12 tests covering: schema validation (3), knowledge base (2), connector dry_run (5), dispatcher (1), SQLite CRUD (1).
 
 ## Known Issues & Limitations
 
-### Manual Google Login
-
-- Login must be completed manually in the browser.
-
-### Playwright Depends on Network
-
-- Slow networks can delay Calendar loading.
-- There are timeouts and error messages, but unstable networks can still affect flow.
-
-### Whisper Performance on CPU
-
-- `small` on CPU can be slow on weaker machines.
-- Consider `distil` or `tiny` for faster speed.
-
-### NLP Is Not Full Semantics
-
-- It has limited context handling.
-- You can integrate LLMs (e.g., ChatGPT) for better semantic understanding.
-
-### Same-Day Events Only
-
-- Cross-day events are not supported yet.
-- Hooks are reserved for future expansion.
-
-### History
-
-- No logging UI yet; Record page is reserved.
+- **Manual Google Login**: First run requires manual login + MFA in the browser
+- **Playwright Depends on Network**: Slow networks can delay Calendar loading
+- **Whisper on CPU**: `small` model can be slow; consider `tiny` for speed
+- **Same-Day Events Only**: Cross-day events not yet supported
+- **Connector Auth**: Slack/Linear/Email require valid credentials in `.env` to execute (dry_run preview always works)
 
 ## Repository
 
