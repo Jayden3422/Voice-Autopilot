@@ -1,0 +1,186 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "intent",
+    "summary",
+    "next_best_actions"
+  ],
+  "properties": {
+    "conversation_language": {
+      "type": "string",
+      "enum": [
+        "en",
+        "zh"
+      ],
+      "default": "en"
+    },
+    "intent": {
+      "type": "string",
+      "enum": [
+        "sales_lead",
+        "support_issue",
+        "feature_request",
+        "bug_report",
+        "scheduling",
+        "other"
+      ]
+    },
+    "urgency": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        null
+      ]
+    },
+    "budget": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "range_min",
+        "range_max",
+        "confidence"
+      ],
+      "properties": {
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "range_min": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null
+        },
+        "range_max": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "default": null
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        }
+      }
+    },
+    "product_interest": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "entities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "company": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "contact_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "email": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "phone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "default": {}
+    },
+    "summary": {
+      "type": "string"
+    },
+    "next_best_actions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/action_item"
+      }
+    },
+    "follow_up_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "confidence_notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    }
+  },
+  "definitions": {
+    "action_item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_type",
+        "requires_confirmation",
+        "confidence",
+        "payload"
+      ],
+      "properties": {
+        "action_type": {
+          "type": "string",
+          "enum": [
+            "create_meeting",
+            "send_slack_summary",
+            "send_email_followup",
+            "create_ticket",
+            "none"
+          ]
+        },
+        "requires_confirmation": {
+          "type": "boolean",
+          "default": true
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "payload": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}
