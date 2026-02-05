@@ -1,6 +1,6 @@
 import base64
 import os
-from datetime import datetime
+from datetime import datetime, date as Date, time as Time
 import asyncio
 import logging
 from pathlib import Path
@@ -13,10 +13,12 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from tools.models import VoiceResponse
+from tools.models import VoiceResponse, CalendarCommand
 from tools.file_utils import save_temp_file
 from tools.speech import transcribe_audio, synthesize_speech
-from tools.nlp import parse_calendar_command
+# NLP regex parser kept as fallback (commented out as primary)
+# from tools.nlp import parse_calendar_command
+from chat.calendar_extractor import extract_calendar_event
 from tools.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
 
@@ -135,10 +137,15 @@ async def handle_voice(
         audio_base64=audio_b64,
       )
 
-    # NLP
-    now = datetime.now()
+    # GPT-based calendar slot extraction (replaces regex NLP)
     try:
-      cmd = parse_calendar_command(user_text, now=now, lang=normalized_lang)
+      extracted = await extract_calendar_event(user_text, lang=normalized_lang)
+      cmd = CalendarCommand(
+        date=datetime.strptime(extracted["date"], "%Y-%m-%d").date(),
+        start_time=datetime.strptime(extracted["start_time"], "%H:%M").time(),
+        end_time=datetime.strptime(extracted["end_time"], "%H:%M").time(),
+        title=extracted.get("title", "Meeting" if normalized_lang == "en" else "日程安排"),
+      )
     except Exception as e:
       logger.exception("%s: %s", _msg(normalized_lang, "nlp_failed", LOG_MESSAGES), e)
       ai_text = msgs["nlp_failed"]

@@ -9,6 +9,8 @@ from pathlib import Path
 import jsonschema
 from openai import AsyncOpenAI, BadRequestError
 
+from utils.timezone import now as now_toronto, TIMEZONE
+
 logger = logging.getLogger(__name__)
 
 BUSINESS_DIR = Path(__file__).resolve().parent.parent / "business"
@@ -69,8 +71,15 @@ async def extract_autopilot_json(
     client = get_openai_client()
     model = model or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     schema = _load_schema(schema_name)
-    system_prompt = _load_prompt(prompt_name)
+    prompt_template = _load_prompt(prompt_name)
     tools = _build_tools(schema)
+
+    # Inject current datetime so GPT can resolve relative dates
+    current_dt = now_toronto()
+    system_prompt = prompt_template.format(
+        current_datetime=current_dt.strftime("%Y-%m-%d %H:%M (%A)"),
+        timezone_name=str(TIMEZONE),
+    )
 
     messages = [
         {"role": "system", "content": system_prompt},
