@@ -1,6 +1,7 @@
 import { Navigate } from "react-router-dom";
 import Home from "../pages/Home";
 import Record from "../pages/Record";
+import Autopilot from "../pages/Autopilot";
 
 const routes = [
   {
@@ -11,6 +12,11 @@ const routes = [
     path: "/home",
     element: <Home />,
     labelKey: "nav.home",
+  },
+  {
+    path: "/autopilot",
+    element: <Autopilot />,
+    labelKey: "nav.autopilot",
   },
   {
     path: "/record",

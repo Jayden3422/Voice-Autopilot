@@ -3,6 +3,10 @@ import os
 from datetime import datetime
 import asyncio
 import logging
+from pathlib import Path
+
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
@@ -14,8 +18,10 @@ from tools.file_utils import save_temp_file
 from tools.speech import transcribe_audio, synthesize_speech
 from tools.nlp import parse_calendar_command
 from tools.calendar_agent import GoogleCalendarAgent
+from api.autopilot import router as autopilot_router
 
 app = FastAPI(title="Voice Schedule Assistant")
+app.include_router(autopilot_router)
 logger = logging.getLogger(__name__)
 
 app.add_middleware(
