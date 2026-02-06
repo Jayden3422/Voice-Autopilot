@@ -149,38 +149,218 @@
   },
   "definitions": {
     "action_item": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "action_type",
-        "requires_confirmation",
-        "confidence",
-        "payload"
-      ],
-      "properties": {
-        "action_type": {
-          "type": "string",
-          "enum": [
-            "create_meeting",
-            "send_slack_summary",
-            "send_email_followup",
-            "create_ticket",
-            "none"
-          ]
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action_type",
+            "requires_confirmation",
+            "confidence",
+            "payload"
+          ],
+          "properties": {
+            "action_type": {
+              "const": "create_meeting"
+            },
+            "requires_confirmation": {
+              "type": "boolean",
+              "default": true
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "date": {
+                  "type": "string",
+                  "description": "Meeting date in YYYY-MM-DD format. REQUIRED. Extract from conversation or use relative date (e.g., tomorrow, next Monday)."
+                },
+                "start_time": {
+                  "type": "string",
+                  "description": "Meeting start time in HH:MM format (24-hour). REQUIRED. Extract from conversation."
+                },
+                "end_time": {
+                  "type": "string",
+                  "description": "Meeting end time in HH:MM format (24-hour). REQUIRED. Extract from conversation or infer (default 1 hour after start)."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Meeting title. Use conversation summary if not explicitly mentioned."
+                },
+                "attendees": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "List of attendee email addresses.",
+                  "default": []
+                }
+              },
+              "required": ["title"]
+            }
+          }
         },
-        "requires_confirmation": {
-          "type": "boolean",
-          "default": true
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action_type",
+            "requires_confirmation",
+            "confidence",
+            "payload"
+          ],
+          "properties": {
+            "action_type": {
+              "const": "send_slack_summary"
+            },
+            "requires_confirmation": {
+              "type": "boolean",
+              "default": true
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "channel": {
+                  "type": "string",
+                  "description": "Slack channel name (e.g., #general).",
+                  "default": "#general"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Message to post to Slack."
+                }
+              },
+              "required": []
+            }
+          }
         },
-        "confidence": {
-          "type": "number",
-          "minimum": 0.0,
-          "maximum": 1.0
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action_type",
+            "requires_confirmation",
+            "confidence",
+            "payload"
+          ],
+          "properties": {
+            "action_type": {
+              "const": "send_email_followup"
+            },
+            "requires_confirmation": {
+              "type": "boolean",
+              "default": true
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "to": {
+                  "type": "string",
+                  "description": "Recipient email address. REQUIRED."
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "Email subject line."
+                },
+                "body": {
+                  "type": "string",
+                  "description": "Email body content."
+                }
+              },
+              "required": []
+            }
+          }
         },
-        "payload": {
-          "type": "object"
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action_type",
+            "requires_confirmation",
+            "confidence",
+            "payload"
+          ],
+          "properties": {
+            "action_type": {
+              "const": "create_ticket"
+            },
+            "requires_confirmation": {
+              "type": "boolean",
+              "default": true
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "description": "Ticket title."
+                },
+                "description": {
+                  "type": "string",
+                  "description": "Ticket description."
+                },
+                "priority": {
+                  "type": "string",
+                  "enum": ["low", "medium", "high"],
+                  "description": "Ticket priority based on urgency.",
+                  "default": "medium"
+                }
+              },
+              "required": []
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action_type",
+            "requires_confirmation",
+            "confidence",
+            "payload"
+          ],
+          "properties": {
+            "action_type": {
+              "const": "none"
+            },
+            "requires_confirmation": {
+              "type": "boolean",
+              "default": true
+            },
+            "confidence": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "payload": {
+              "type": "object"
+            }
+          }
         }
-      }
+      ]
     }
   }
 }
