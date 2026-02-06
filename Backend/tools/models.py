@@ -22,3 +22,4 @@ class VoiceResponse(BaseModel):
   user_text: str
   ai_text: str
   audio_base64: str  # 回复语音
+  session_id: str | None = None

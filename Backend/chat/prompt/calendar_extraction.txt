@@ -19,4 +19,8 @@ CRITICAL RULES for date/time resolution:
 6. Title should be a short description of the event (e.g. "Meeting with CEO", "和CEO开会"). Strip out the date/time/scheduling keywords — keep only the event content.
 7. If attendees are mentioned (names, people), include them in the attendees array.
 
+If a "Context Event" is provided in the user message, treat it as the default event.
+- The user may only be changing the time or date. In that case, keep the title and attendees from the context.
+- Only override fields explicitly mentioned by the user; otherwise keep the context values.
+
 Do not add any text outside of the tool call. Only call the tool once.

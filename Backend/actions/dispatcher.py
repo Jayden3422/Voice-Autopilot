@@ -121,13 +121,18 @@ async def _execute_calendar(payload: dict, lang: str = "en") -> dict:
         result = await asyncio.to_thread(agent.check_and_create_event, cmd)
 
         if result.conflict:
+            suggestion = (
+                "请用语音或文字说出新的时间，我会帮你改期。"
+                if lang.startswith("zh")
+                else "Reply with a new time (voice or text) and I'll reschedule it."
+            )
             return {
                 "action_type": "create_meeting",
                 "status": "blocked",
                 "result": {
                     "conflict": True,
                     "message": result.message,
-                    "suggestion": "Please choose a different time slot.",
+                    "suggestion": suggestion,
                 },
             }
         elif result.success:

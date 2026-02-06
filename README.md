@@ -1,10 +1,10 @@
-# voice-assistant
+﻿# Voice-Autopilot
 
 [中文 README](README_zh.md)
 
 A **voice-first smart scheduling web app** with an integrated **Sales/Support Autopilot** system.
 
-- **Voice Scheduling**: Speak → Whisper STT → **GPT slot extraction** (date/time/title) → Playwright automates Google Calendar.
+- **Voice Scheduling**: Speak or type → Whisper STT (voice) → GPT slot extraction (date/time/title) → Playwright automates Google Calendar.
 - **Autopilot**: Conversation → OpenAI Tool Calling extraction → RAG retrieval → Reply draft → Actions (Calendar / Slack / Email / Ticket) → Human confirmation → Execute → Audit log.
 
 > **Note:** The original regex/keyword-based NLP parser (`tools/nlp.py`) has been **commented out**. All date/time/title extraction is now handled by OpenAI Tool Calling with the current Toronto datetime injected into the system prompt, enabling natural understanding of relative expressions like "tomorrow", "next Tuesday", "下周三", "后天", etc.
@@ -63,6 +63,10 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your@email.com
 SMTP_PASS=your-app-password
+SMTP_FROM=noreply@yourdomain.com
+SMTP_FROM_NAME=Voice Autopilot
+SMTP_SSL=false
+SMTP_TIMEOUT=30
 ```
 
 ## Overview
@@ -70,7 +74,7 @@ SMTP_PASS=your-app-password
 ```
 Frontend/
   src/
-    pages/Home/           # Voice conversation page
+    pages/Home/           # Voice conversation page (voice + text)
     pages/Autopilot/      # Sales/Support Autopilot page
     utils/                # Axios wrapper
     router/               # React Router
@@ -140,6 +144,7 @@ knowledge_base/           # Markdown docs for RAG (10 included)
   - TTS via `edge_tts` with bilingual voices + fallback
 - **Calendar Extraction**: `chat/calendar_extractor.py`
   - GPT Tool Calling with Toronto datetime injection
+  - Supports time updates based on context when conflicts occur
   - Replaces the old regex NLP (`tools/nlp.py`, now commented out)
 - **Google Calendar Agent**: `tools/calendar_agent.py`
   - Playwright + local Chrome
@@ -174,18 +179,13 @@ Across UI, logs, errors, AI extraction, and Autopilot output.
 ### 2. Voice Scheduling (AI-powered)
 
 - Click **Start Voice Conversation** on the Home page
-- Speak a scheduling request in Chinese or English:
+- Speak or type a scheduling request in Chinese or English
   - Relative dates: "tomorrow", "next Tuesday", "明天", "下周三", "后天"
   - Explicit dates: "Feb 10", "2月10号"
   - Natural times: "2pm to 3pm", "下午两点到三点"
 - GPT extracts date/time/title via Tool Calling (current Toronto time injected into prompt)
 - System checks conflicts and creates Google Calendar event
-
-![image-20260127235511409](assets/image-20260127235511409.png)
-
-In `Slack`:
-
-![image-20260205011401548](assets/image-20260205011401548.png)
+- **If a conflict occurs**, you can reply with **voice or text** to adjust the time (you can say only the new time)
 
 ### 3. Google Calendar Automation
 
@@ -193,11 +193,41 @@ In `Slack`:
 - Persistent login session (first run requires manual Google login + MFA)
 - Automatic conflict detection
 
+![image-20260206010955719](assets/image-20260206010955719.png)
+
 ### 4. Sales/Support Autopilot
 
 Navigate to `http://localhost:5173/autopilot`
 
-![image-20260205010238306](assets/image-20260205010238306.png)
+#### Example
+
+After analysis:
+
+![image-20260206005738726](assets/image-20260206005738726.png)
+
+Meeting in Calendar:
+
+![image-20260206005800388](assets/image-20260206005800388.png)
+
+In Slack:
+
+![image-20260206005815687](assets/image-20260206005815687.png)
+
+Response Email:
+
+![image-20260206005845464](assets/image-20260206005845464.png)
+
+#### Conflict in Calendar
+
+Ask to reschedule:
+
+![image-20260206010107595](assets/image-20260206010107595.png)
+
+User selects a new date/time and reschedules:
+
+![image-20260206010530441](assets/image-20260206010530441.png)
+
+#### How It Works
 
 **Full pipeline**:
 
@@ -206,8 +236,6 @@ Input (text/voice) → Whisper STT → OpenAI Tool Calling (structured extractio
   → RAG knowledge base retrieval → Reply draft with citations
   → Action Plan → Human confirmation → Execute → Audit log
 ```
-
-#### How It Works
 
 1. **Input**: Paste conversation text or record audio
 2. **AI Extraction**: OpenAI extracts intent, urgency, budget, entities, and suggests next-best-actions (strict JSON Schema with repair pass)
@@ -220,46 +248,28 @@ Input (text/voice) → Whisper STT → OpenAI Tool Calling (structured extractio
    - `create_ticket` — title/description from summary, priority from urgency
 6. **Confirm & Execute**: Preview all actions, edit payloads, check/uncheck, then confirm
 
+#### Autopilot Enhancements
+
+- **Email follow-up**: If the input contains an email address, the AI reply is formatted as an email (with a noreply notice) and added as a `send_email_followup` action.
+- **Rich-text email preview**: The frontend renders the email body as rich text.
+- **Reschedule on conflict**: If a calendar action conflicts, you can adjust the time by voice or text and re-run the action.
+- **Slack summaries always included**: A `send_slack_summary` action is added by default (even if the model doesn't suggest it), so every run can post a summary to your Slack channel.
+
 #### Autopilot API
 
 | Endpoint | Description |
 |---|---|
 | `POST /autopilot/run` | Analyze conversation (audio or text). Returns `run_id`, transcript, extracted JSON, evidence, reply draft, action previews. |
 | `POST /autopilot/confirm` | Execute confirmed actions. Returns per-action status and results (URLs, summaries). |
+| `POST /autopilot/adjust-time` | Adjust a `create_meeting` time using voice or text and return an updated action preview. |
 | `POST /autopilot/ingest` | Re-index the knowledge base into the FAISS vector store. |
 
-**Example request** (`/autopilot/run`):
+#### Voice/Calendar API
 
-```json
-{
-  "mode": "text",
-  "text": "Hi, I'm John from Acme Corp. We need your voice assistant for our sales team. Budget is around $5000/month. Can we schedule a demo next Tuesday at 2pm?",
-  "locale": "en"
-}
-```
-
-**Example response** (abbreviated):
-
-```json
-{
-  "run_id": "a1b2c3d4-...",
-  "transcript": "Hi, I'm John from Acme Corp...",
-  "extracted": {
-    "intent": "sales_lead",
-    "urgency": "medium",
-    "budget": { "currency": "USD", "range_min": 5000, "range_max": 5000, "confidence": 0.9 },
-    "entities": { "company": "Acme Corp", "contact_name": "John" },
-    "summary": "Sales lead from Acme Corp requesting demo, $5K/mo budget.",
-    "next_best_actions": [
-      { "action_type": "create_meeting", "confidence": 0.95, "payload": { "title": "Demo with Acme Corp", "date": "2026-02-10", "start_time": "14:00", "end_time": "15:00" } },
-      { "action_type": "send_slack_summary", "confidence": 0.85, "payload": { "message": "Intent: sales lead\nCompany: Acme Corp\n..." } }
-    ]
-  },
-  "evidence": [{ "doc": "02_pricing.md", "chunk": 1, "score": 0.82, "text": "..." }],
-  "reply_draft": { "text": "Hi John, thanks for reaching out...", "citations": ["02_pricing.md#1"] },
-  "actions_preview": [{ "action_type": "create_meeting", "preview": "Calendar: Demo with Acme Corp on 2026-02-10 from 14:00 to 15:00" }]
-}
-```
+| Endpoint | Description |
+|---|---|
+| `POST /voice` | Voice scheduling (audio). Supports `session_id` for conflict rescheduling. |
+| `POST /calendar/text` | Text scheduling. Supports `session_id` for conflict rescheduling. |
 
 #### Knowledge Base
 
@@ -290,4 +300,4 @@ python -m pytest tests/test_autopilot.py -v
 
 ## Repository
 
-- GitHub: https://github.com/Jayden3422/voice-assistant
+- GitHub: https://github.com/Jayden3422/Voice-Autopilot

@@ -4,6 +4,7 @@ from datetime import datetime, date as Date, time as Time
 import asyncio
 import logging
 from pathlib import Path
+import uuid
 
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -42,6 +43,7 @@ MESSAGES = {
     "nlp_failed": "我没完全听懂你的时间或标题，可以再更清楚地说一次吗？例如：明天上午十点到十一点和公司CEO会议。",
     "create_ok": "好的，已经帮你在 {date} {start} 到 {end} 创建了日程「{title}」。",
     "conflict": "你在 {date} {start} 到 {end} 已经有日程安排了，请换一个时间。",
+    "conflict_retry": "你在 {date} {start} 到 {end} 已经有日程安排了，请告诉我一个新的时间（只说新的时间也可以）。",
     "create_failed": "抱歉，创建日程失败了，请稍后重试。",
   },
   "en": {
@@ -51,6 +53,7 @@ MESSAGES = {
     "nlp_failed": "I couldn't fully understand the time or title. Please say it again clearly, for example: tomorrow 10–11am meeting with the CEO.",
     "create_ok": "Done. I created an event on {date} from {start} to {end}: \"{title}\".",
     "conflict": "You already have an event on {date} from {start} to {end}. Please choose another time.",
+    "conflict_retry": "You already have an event on {date} from {start} to {end}. Tell me a new time (you can just say the new time).",
     "create_failed": "Sorry, I couldn't create the event. Please try again later.",
   },
 }
@@ -81,6 +84,113 @@ LOG_MESSAGES = {
   },
 }
 
+VOICE_SESSION_TTL_SECONDS = 1800
+VOICE_SESSIONS: dict[str, dict] = {}
+
+
+def _now_utc():
+  return datetime.utcnow()
+
+
+def _get_voice_session(session_id: str | None) -> dict | None:
+  if not session_id:
+    return None
+  session = VOICE_SESSIONS.get(session_id)
+  if not session:
+    return None
+  age = (_now_utc() - session.get("updated_at", _now_utc())).total_seconds()
+  if age > VOICE_SESSION_TTL_SECONDS:
+    try:
+      del VOICE_SESSIONS[session_id]
+    except Exception:
+      pass
+    return None
+  return session
+
+
+def _set_voice_session(session_id: str, event: dict, awaiting_update: bool) -> None:
+  VOICE_SESSIONS[session_id] = {
+    "event": event,
+    "awaiting_update": awaiting_update,
+    "updated_at": _now_utc(),
+  }
+
+
+async def _build_voice_response(user_text: str, ai_text: str, lang: str, session_id: str | None, include_audio: bool) -> VoiceResponse:
+  audio_b64 = ""
+  if include_audio:
+    try:
+      audio_bytes = await synthesize_speech(ai_text, lang=lang)
+      audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+    except Exception as e:
+      logger.exception("%s: %s", _msg(lang, "tts_failed", LOG_MESSAGES), e)
+      audio_b64 = ""
+  return VoiceResponse(
+    user_text=user_text,
+    ai_text=ai_text,
+    audio_base64=audio_b64,
+    session_id=session_id,
+  )
+
+
+async def _process_calendar_text(user_text: str, normalized_lang: str, session_id: str | None, include_audio: bool) -> VoiceResponse:
+  msgs = MESSAGES[normalized_lang]
+  if not user_text.strip():
+    return await _build_voice_response(
+      msgs["stt_failed_user"],
+      msgs["stt_empty"],
+      normalized_lang,
+      session_id,
+      include_audio,
+    )
+
+  if not session_id:
+    session_id = str(uuid.uuid4())
+
+  session = _get_voice_session(session_id)
+  context_event = session.get("event") if session and session.get("awaiting_update") else None
+
+  try:
+    extracted = await extract_calendar_event(
+      user_text,
+      lang=normalized_lang,
+      context_event=context_event,
+    )
+    cmd = CalendarCommand(
+      date=datetime.strptime(extracted["date"], "%Y-%m-%d").date(),
+      start_time=datetime.strptime(extracted["start_time"], "%H:%M").time(),
+      end_time=datetime.strptime(extracted["end_time"], "%H:%M").time(),
+      title=extracted.get("title", "Meeting" if normalized_lang == "en" else "日程安排"),
+    )
+  except Exception as e:
+    logger.exception("%s: %s", _msg(normalized_lang, "nlp_failed", LOG_MESSAGES), e)
+    ai_text = msgs["nlp_failed"]
+    return await _build_voice_response(user_text, ai_text, normalized_lang, session_id, include_audio)
+
+  agent = GoogleCalendarAgent(lang=normalized_lang)
+  result = await asyncio.to_thread(agent.check_and_create_event, cmd)
+
+  if result.success:
+    ai_text = msgs["create_ok"].format(
+      date=cmd.date.strftime("%Y-%m-%d"),
+      start=cmd.start_time.strftime("%H:%M"),
+      end=cmd.end_time.strftime("%H:%M"),
+      title=cmd.title,
+    )
+    _set_voice_session(session_id, extracted, awaiting_update=False)
+  elif result.conflict:
+    ai_text = msgs["conflict_retry"].format(
+      date=cmd.date.strftime("%Y-%m-%d"),
+      start=cmd.start_time.strftime("%H:%M"),
+      end=cmd.end_time.strftime("%H:%M"),
+    )
+    _set_voice_session(session_id, extracted, awaiting_update=True)
+  else:
+    ai_text = result.message or msgs["create_failed"]
+    _set_voice_session(session_id, extracted, awaiting_update=False)
+
+  return await _build_voice_response(user_text, ai_text, normalized_lang, session_id, include_audio)
+
 def _normalize_lang(lang: str) -> str:
   if not lang:
     return "zh"
@@ -93,6 +203,13 @@ def _msg(lang: str, key: str, table: dict) -> str:
 class TTSRequest(BaseModel):
   text: str
   lang: str | None = "zh"
+
+
+class CalendarTextRequest(BaseModel):
+  text: str
+  lang: str | None = "zh"
+  session_id: str | None = None
+  include_audio: bool | None = True
 
 @app.post("/tts")
 async def tts(request: TTSRequest):
@@ -110,92 +227,26 @@ async def tts(request: TTSRequest):
 
 @app.post("/voice", response_model=VoiceResponse)
 async def handle_voice(
-  audio: UploadFile = File(...),
+  audio: UploadFile | None = File(None),
+  text: str | None = Form(None),
   lang: str = Form("zh"),
+  session_id: str | None = Form(None),
+  include_audio: bool | None = Form(True),
 ):
   normalized_lang = _normalize_lang(lang)
   msgs = MESSAGES[normalized_lang]
-  if not audio:
+  if not audio and not (text or "").strip():
     raise HTTPException(status_code=400, detail=msgs["no_audio"])
+
+  if text and text.strip():
+    return await _process_calendar_text(text.strip(), normalized_lang, session_id, bool(include_audio))
 
   temp_path = save_temp_file(audio)
 
   try:
     # STT
     user_text = transcribe_audio(temp_path, lang=normalized_lang)
-    if not user_text.strip():
-      ai_text = msgs["stt_empty"]
-      try:
-        audio_bytes = await synthesize_speech(ai_text, lang=normalized_lang)
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-      except Exception as e:
-        logger.exception("%s: %s", _msg(normalized_lang, "tts_failed", LOG_MESSAGES), e)
-        audio_b64 = ""
-      return VoiceResponse(
-        user_text=msgs["stt_failed_user"],
-        ai_text=ai_text,
-        audio_base64=audio_b64,
-      )
-
-    # GPT-based calendar slot extraction (replaces regex NLP)
-    try:
-      extracted = await extract_calendar_event(user_text, lang=normalized_lang)
-      cmd = CalendarCommand(
-        date=datetime.strptime(extracted["date"], "%Y-%m-%d").date(),
-        start_time=datetime.strptime(extracted["start_time"], "%H:%M").time(),
-        end_time=datetime.strptime(extracted["end_time"], "%H:%M").time(),
-        title=extracted.get("title", "Meeting" if normalized_lang == "en" else "日程安排"),
-      )
-    except Exception as e:
-      logger.exception("%s: %s", _msg(normalized_lang, "nlp_failed", LOG_MESSAGES), e)
-      ai_text = msgs["nlp_failed"]
-      try:
-        audio_bytes = await synthesize_speech(ai_text, lang=normalized_lang)
-        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-      except Exception as e:
-        logger.exception("%s: %s", _msg(normalized_lang, "tts_failed", LOG_MESSAGES), e)
-        audio_b64 = ""
-      return VoiceResponse(
-        user_text=user_text,
-        ai_text=ai_text,
-        audio_base64=audio_b64,
-      )
-    
-    # 日历 Agent
-    agent = GoogleCalendarAgent(lang=normalized_lang)
-    result = await asyncio.to_thread(agent.check_and_create_event, cmd)
-    if normalized_lang == "en":
-      if result.success:
-        ai_text = msgs["create_ok"].format(
-          date=cmd.date.strftime("%Y-%m-%d"),
-          start=cmd.start_time.strftime("%H:%M"),
-          end=cmd.end_time.strftime("%H:%M"),
-          title=cmd.title,
-        )
-      elif result.conflict:
-        ai_text = msgs["conflict"].format(
-          date=cmd.date.strftime("%Y-%m-%d"),
-          start=cmd.start_time.strftime("%H:%M"),
-          end=cmd.end_time.strftime("%H:%M"),
-        )
-      else:
-        ai_text = result.message or msgs["create_failed"]
-    else:
-      ai_text = result.message
-
-    # TTS
-    try:
-      audio_bytes = await synthesize_speech(ai_text, lang=normalized_lang)
-      audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
-    except Exception as e:
-      logger.exception("%s: %s", _msg(normalized_lang, "tts_failed", LOG_MESSAGES), e)
-      audio_b64 = ""
-
-    return VoiceResponse(
-      user_text=user_text,
-      ai_text=ai_text,
-      audio_base64=audio_b64,
-    )
+    return await _process_calendar_text(user_text, normalized_lang, session_id, True)
 
   except HTTPException:
     raise
@@ -207,6 +258,17 @@ async def handle_voice(
       os.remove(temp_path)
     except Exception:
       pass
+
+
+@app.post("/calendar/text", response_model=VoiceResponse)
+async def handle_calendar_text(request: CalendarTextRequest):
+  normalized_lang = _normalize_lang(request.lang or "zh")
+  return await _process_calendar_text(
+    request.text or "",
+    normalized_lang,
+    request.session_id,
+    bool(request.include_audio),
+  )
 
 if __name__ == "__main__":
   uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

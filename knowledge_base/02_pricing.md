@@ -108,7 +108,7 @@ Contact sales@Jayden.com for a custom quote.
 
 - **Billing Cycle**: Monthly or annual. Annual plans receive a **15% discount**.
 - **Payment Methods**: Credit card, ACH bank transfer, wire transfer (Enterprise only).
-- **Currency**: Billed in USD. Invoices available in EUR, GBP, and CNY upon request.
+- **Currency**: Billed in CAD. Invoices available in EUR, GBP, and CNY upon request.
 - **Cancellation**: Cancel anytime. No long-term contracts on Starter and Pro plans.
 - **Refund Policy**: Pro-rated refund available within the first 30 days.
 

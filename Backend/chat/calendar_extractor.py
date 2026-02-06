@@ -75,6 +75,7 @@ async def extract_calendar_event(
     *,
     lang: str = "zh",
     model: str | None = None,
+    context_event: dict | None = None,
 ) -> dict:
     """
     Use GPT Tool Calling to extract date/time/title from user input.
@@ -92,14 +93,30 @@ async def extract_calendar_event(
         timezone_name=str(TIMEZONE),
     )
 
+    if context_event:
+        context_json = json.dumps(context_event, ensure_ascii=False)
+        user_content = (
+            "Context Event (use as defaults if not overridden):\n"
+            f"{context_json}\n\n"
+            f"User Input:\n{user_text}"
+        )
+    else:
+        user_content = user_text
+
     messages = [
         {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_text},
+        {"role": "user", "content": user_content},
     ]
 
     tools = _build_tools(schema)
 
-    logger.info("Calendar extraction: model=%s, lang=%s, text=%r", model, lang, user_text[:200])
+    logger.info(
+        "Calendar extraction: model=%s, lang=%s, context=%s, text=%r",
+        model,
+        lang,
+        "yes" if context_event else "no",
+        user_text[:200],
+    )
 
     response = await _call_with_tools(client, model, messages, tools)
     tool_call = response.choices[0].message.tool_calls[0]
@@ -107,6 +124,18 @@ async def extract_calendar_event(
     logger.info("Calendar extraction raw: %s", raw[:500])
 
     parsed = json.loads(raw)
+
+    if context_event:
+        if not parsed.get("date"):
+            parsed["date"] = context_event.get("date", "")
+        if not parsed.get("start_time"):
+            parsed["start_time"] = context_event.get("start_time", "")
+        if not parsed.get("end_time"):
+            parsed["end_time"] = context_event.get("end_time", "")
+        if not parsed.get("title"):
+            parsed["title"] = context_event.get("title", "")
+        if "attendees" not in parsed and "attendees" in context_event:
+            parsed["attendees"] = context_event.get("attendees", [])
 
     # Validate & normalise date
     parsed["date"] = _normalise_date(parsed.get("date", ""), current_dt)

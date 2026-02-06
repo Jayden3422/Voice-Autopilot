@@ -111,3 +111,42 @@
     border-bottom: none;
   }
 }
+
+.autopilot-email-preview {
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  padding: 10px;
+  background: #fafafa;
+}
+
+.autopilot-email-meta {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 8px;
+
+  div {
+    margin-bottom: 4px;
+  }
+}
+
+.autopilot-email-body {
+  font-size: 13px;
+  line-height: 1.6;
+
+  p {
+    margin: 0 0 8px 0;
+  }
+
+  .email-footer {
+    color: #888;
+    font-size: 12px;
+  }
+}
+
+.autopilot-reschedule {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+}
