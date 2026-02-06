@@ -201,31 +201,31 @@ Navigate to `http://localhost:5173/autopilot`
 
 #### Example
 
-After analysis:
+After analysis, confirm the Action Plan for execution:
 
-![image-20260206005738726](assets/image-20260206005738726.png)
+![image-20260206023537765](assets/image-20260206023537765.png)
 
 Meeting in Calendar:
 
-![image-20260206005800388](assets/image-20260206005800388.png)
+![image-20260206023600869](assets/image-20260206023600869.png)
 
 In Slack:
 
-![image-20260206005815687](assets/image-20260206005815687.png)
+![image-20260206023621965](assets/image-20260206023621965.png)
 
 Response Email:
 
-![image-20260206005845464](assets/image-20260206005845464.png)
+![image-20260206023639686](assets/image-20260206023639686.png)
 
-#### Conflict in Calendar
+#### Calendar Conflict
 
-Ask to reschedule:
+Request to reschedule the meeting.
 
-![image-20260206010107595](assets/image-20260206010107595.png)
+User needs to select a new date/time and reschedule:
 
-User selects a new date/time and reschedules:
+![image-20260206023805388](assets/image-20260206023805388.png)
 
-![image-20260206010530441](assets/image-20260206010530441.png)
+![image-20260206023948432](assets/image-20260206023948432.png)
 
 #### How It Works
 
