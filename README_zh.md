@@ -201,21 +201,21 @@ python main.py
 
 #### 示例
 
-解析结束后
+解析结束后确认`Action Plan`执行
 
-![image-20260206005738726](assets/image-20260206005738726.png)
+![image-20260206023537765](assets/image-20260206023537765.png)
 
 日历`meeting`
 
-![image-20260206005800388](assets/image-20260206005800388.png)
+![image-20260206023600869](assets/image-20260206023600869.png)
 
 在`Slack`中：
 
- ![image-20260206005815687](README_zh.assets/image-20260206005815687.png)
+![image-20260206023621965](assets/image-20260206023621965.png)
 
 应答邮件：
 
-![image-20260206005845464](assets/image-20260206005845464.png)
+![image-20260206023639686](assets/image-20260206023639686.png)
 
 #### 日历冲突
 
@@ -223,9 +223,9 @@ python main.py
 
 用户需要选定新的日期或者时间然后重新安排
 
-![image-20260206010107595](assets/image-20260206010107595.png)
+![image-20260206023805388](assets/image-20260206023805388.png)
 
-![image-20260206010530441](assets/image-20260206010530441.png)
+![image-20260206023948432](assets/image-20260206023948432.png)
 
 #### 工作原理
 

@@ -191,6 +191,8 @@ async def autopilot_confirm(req: AutopilotConfirmRequest):
             action = actions[idx]
             try:
                 payload = action.get("payload") or {}
+                # Enrich title before finalizing
+                payload = _enrich_calendar_title(payload, summary, extracted_json, locale)
                 payload = _finalize_calendar_payload(payload, summary, locale, current_dt)
                 action["payload"] = payload
                 result = await execute_action(action, lang=locale)
@@ -425,6 +427,8 @@ async def _enrich_actions(
         atype = a.get("action_type", "none")
 
         if atype == "create_meeting":
+            # Enrich title with key information (budget, product, company) from extracted data
+            payload = _enrich_calendar_title(payload, summary, extracted, lang)
             payload = _prepare_calendar_payload_for_preview(payload, summary, lang, current_dt)
 
         elif atype == "send_slack_summary":
@@ -522,6 +526,73 @@ def _resolve_time(value: str) -> str:
         except ValueError:
             continue
     return value
+
+
+def _enrich_calendar_title(payload: dict, summary: str, extracted: dict, lang: str) -> dict:
+    """
+    Enrich calendar title with key business information (budget, product, company).
+    This ensures important context is visible in the calendar event.
+    """
+    current_title = payload.get("title", "")
+
+    # If title is empty or too generic, use summary as base
+    if not current_title or len(current_title) < 10:
+        current_title = summary[:60] if summary else ("Meeting" if lang == "en" else "会议")
+
+    # Extract key information to append
+    info_parts = []
+
+    # Add company name
+    entities = extracted.get("entities") or {}
+    company = entities.get("company")
+    if company:
+        info_parts.append(company)
+
+    # Add product interest
+    products = extracted.get("product_interest", [])
+    if products:
+        product_str = ", ".join(products[:2])  # First 2 products
+        info_parts.append(product_str)
+
+    # Add budget information
+    budget = extracted.get("budget")
+    if budget and isinstance(budget, dict):
+        currency = budget.get("currency", "CAD")
+        range_min = budget.get("range_min")
+        range_max = budget.get("range_max")
+        if range_min is not None or range_max is not None:
+            if range_min == range_max and range_min is not None:
+                budget_str = f"{currency} ${range_min:,.0f}"
+            elif range_min is not None and range_max is not None:
+                budget_str = f"{currency} ${range_min:,.0f}-${range_max:,.0f}"
+            elif range_min is not None:
+                budget_str = f"{currency} ${range_min:,.0f}+"
+            elif range_max is not None:
+                budget_str = f"{currency} <${range_max:,.0f}"
+            else:
+                budget_str = None
+            if budget_str:
+                info_parts.append(budget_str)
+
+    # Combine title with key info
+    if info_parts:
+        separator = " - "
+        enriched_title = current_title
+        for part in info_parts:
+            if part and part.lower() not in enriched_title.lower():
+                enriched_title = f"{enriched_title}{separator}{part}"
+
+        # Limit total length
+        if len(enriched_title) > 120:
+            enriched_title = enriched_title[:117] + "..."
+
+        payload["title"] = enriched_title
+    else:
+        # No additional info, just ensure title exists
+        if not payload.get("title"):
+            payload["title"] = summary[:80] if summary else ("Meeting" if lang == "en" else "会议")
+
+    return payload
 
 
 def _prepare_calendar_payload_for_preview(payload: dict, summary: str, lang: str, current_dt) -> dict:
