@@ -1,13 +1,13 @@
-# voice-assistant
+﻿# Voice-Autopilot
 
 [English README](README.md)
 
-一个 **语音驱动的智能日程 Web 应用**，集成 **销售/支持自动驾驶（Autopilot）** 系统。
+一个 **语音优先的智能日程 Web 应用**，集成 **销售/支持自动驾驶（Autopilot）** 系统。
 
-- **语音日程**：说话 → Whisper STT → **GPT 槽位提取**（日期/时间/标题） → Playwright 自动化 Google Calendar。
-- **Autopilot**：对话 → OpenAI Tool Calling 结构化提取 → RAG 知识库检索 → 回复草稿 → 动作（日历 / Slack / 邮件 / 工单） → 人工确认 → 执行 → 审计日志。
+- **语音/文字日程**：说话或输入 → Whisper STT（语音）→ GPT 槽位提取（日期/时间/标题）→ Playwright 自动化 Google Calendar。
+- **Autopilot**：对话 → OpenAI Tool Calling 结构化提取 → RAG 知识库检索 → 回复草稿 → 动作（Calendar / Slack / Email / Ticket）→ 人工确认 → 执行 → 审计日志。
 
-> **说明：** 原先基于正则/关键词匹配的 NLP 解析器（`tools/nlp.py`）已**注释掉**。现在所有日期/时间/标题提取均由 OpenAI Tool Calling 完成，系统会将当前多伦多时间注入 prompt，使模型能自然理解"明天"、"下周二"、"后天"、"next Tuesday"等中英文相对时间表达。
+> **说明：** 原先基于正则/关键词匹配的 NLP 解析器（`tools/nlp.py`）已**注释掉**。现在所有日期/时间/标题提取均由 OpenAI Tool Calling 完成，系统会将当前多伦多时间注入 prompt，可自然理解“明天”“下周二”“后天”等相对时间表达。
 
 ## 环境配置
 
@@ -38,7 +38,7 @@ python -m playwright install chromium
 
 ### 配置
 
-将项目根目录下的 `.env.example` 复制为 `.env` 并填入你的密钥：
+将项目根目录下的 `.env.example` 复制为 `.env` 并填写你的密钥：
 
 ```bash
 cp .env.example .env
@@ -53,7 +53,7 @@ OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 TIMEZONE=America/Toronto             # 默认时区，用于日期解析
 ```
 
-可选项（启用对应的动作连接器）：
+可选项（启用对应动作连接器）：
 
 ```env
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
@@ -63,6 +63,10 @@ SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your@email.com
 SMTP_PASS=your-app-password
+SMTP_FROM=noreply@yourdomain.com
+SMTP_FROM_NAME=Voice Autopilot
+SMTP_SSL=false
+SMTP_TIMEOUT=30
 ```
 
 ## 总览
@@ -70,7 +74,7 @@ SMTP_PASS=your-app-password
 ```
 Frontend/
   src/
-    pages/Home/           # 语音对话页面
+    pages/Home/           # 语音/文字对话页面
     pages/Autopilot/      # 销售/支持 Autopilot 页面
     utils/                # Axios 封装
     router/               # React Router
@@ -139,7 +143,8 @@ knowledge_base/           # RAG 用 Markdown 文档（含 10 篇示例）
   - OpenCC `t2s` 简繁转换
   - TTS 使用 `edge_tts`，中英音色 + 自动 fallback
 - **日历提取**：`chat/calendar_extractor.py`
-  - GPT Tool Calling + 多伦多当前时间注入
+  - GPT Tool Calling + 当前多伦多时间注入
+  - 冲突时支持在上下文中只修改时间
   - 替代旧版正则 NLP（`tools/nlp.py`，已注释）
 - **Google Calendar Agent**：`tools/calendar_agent.py`
   - Playwright + 本地 Chrome
@@ -171,17 +176,16 @@ python main.py
 
 覆盖 UI、日志、报错、AI 提取、Autopilot 输出。
 
-### 2. 语音日程（AI 驱动）
+### 2. 语音/文字日程（AI 驱动）
 
 - 在 Home 页面点击 **开始语音对话**
-- 支持中英文自然表达：
-  - 相对日期："明天"、"后天"、"下周三"、"next Tuesday"
-  - 明确日期："2月10号"、"Feb 10"
-  - 自然时间："下午两点到三点"、"2pm to 3pm"
-- GPT 通过 Tool Calling 提取日期/时间/标题（当前多伦多时间注入 prompt）
-- 系统检测冲突、创建 Google Calendar 事件
-
-![image-20260127235511409](assets/image-20260127235511409.png)
+- 用中文或英文说/输入日程：
+  - 相对日期：“明天”“后天”“下周三”“next Tuesday”
+  - 明确日期：“2月10号”“Feb 10”
+  - 自然时间：“下午两点到三点”“2pm to 3pm”
+- GPT 通过 Tool Calling 提取日期/时间/标题
+- 系统检测冲突并创建 Google Calendar 事件
+- **如发生冲突**，可用 **语音或文字** 只说新的时间进行改期（`4`中有示例）
 
 ### 3. Google Calendar 自动化
 
@@ -189,15 +193,41 @@ python main.py
 - 持久化登录（首次运行需手动登录 Google + MFA）
 - 自动冲突检测
 
+![image-20260206010955719](assets/image-20260206010955719.png)
+
 ### 4. 销售/支持 Autopilot
 
 访问 `http://localhost:5173/autopilot`
 
-![image-20260205010238306](assets/image-20260205010238306.png)
+#### 示例
+
+解析结束后
+
+![image-20260206005738726](assets/image-20260206005738726.png)
+
+日历`meeting`
+
+![image-20260206005800388](assets/image-20260206005800388.png)
 
 在`Slack`中：
 
-![image-20260205011401548](assets/image-20260205011401548.png) 
+ ![image-20260206005815687](README_zh.assets/image-20260206005815687.png)
+
+应答邮件：
+
+![image-20260206005845464](assets/image-20260206005845464.png)
+
+#### 日历冲突
+
+要求重新排时间，
+
+用户需要选定新的日期或者时间然后重新安排
+
+![image-20260206010107595](assets/image-20260206010107595.png)
+
+![image-20260206010530441](assets/image-20260206010530441.png)
+
+#### 工作原理
 
 **完整管线**：
 
@@ -206,8 +236,6 @@ python main.py
   → RAG 知识库检索 → 带引用的回复草稿
   → 动作计划 → 人工确认 → 执行 → 审计日志
 ```
-
-#### 工作原理
 
 1. **输入**：粘贴对话文本或录制音频
 2. **AI 提取**：OpenAI 提取意图、紧急程度、预算、实体信息，并建议下一步动作（严格 JSON Schema + 修复重试）
@@ -220,50 +248,32 @@ python main.py
    - `create_ticket` — 标题/描述取自摘要，优先级取自紧急程度
 6. **确认并执行**：预览所有动作，编辑 Payload，勾选/取消，然后确认
 
+#### Autopilot 增强
+
+- **邮件自动跟进**：输入中包含邮箱时，AI 回复会按邮件格式生成（含 noreply 提示），并加入 `send_email_followup` 动作。
+- **富文本邮件预览**：前端以富文本方式展示邮件正文。
+- **冲突改期**：日历动作冲突时，可用语音或文字更新会议时间并重新执行。
+- **Slack 总结默认开启**：即使模型未建议，也会默认添加 `send_slack_summary` 动作，确保每次运行都能发送摘要到 Slack。
+
 #### Autopilot API
 
 | 端点 | 说明 |
 |---|---|
 | `POST /autopilot/run` | 分析对话（音频或文本）。返回 `run_id`、转录文本、提取 JSON、证据、回复草稿、动作预览。 |
 | `POST /autopilot/confirm` | 执行已确认的动作。返回每个动作的状态和结果（URL、摘要）。 |
+| `POST /autopilot/adjust-time` | 用语音或文字调整 `create_meeting` 时间并返回更新后的动作预览。 |
 | `POST /autopilot/ingest` | 重新索引知识库到 FAISS 向量存储。 |
 
-**请求示例**（`/autopilot/run`）：
+#### 日历 API
 
-```json
-{
-  "mode": "text",
-  "text": "Hi, I'm John from Acme Corp. We need your voice assistant for our sales team. Budget is around $5000/month. Can we schedule a demo next Tuesday at 2pm?",
-  "locale": "en"
-}
-```
-
-**响应示例**（节选）：
-
-```json
-{
-  "run_id": "a1b2c3d4-...",
-  "transcript": "Hi, I'm John from Acme Corp...",
-  "extracted": {
-    "intent": "sales_lead",
-    "urgency": "medium",
-    "budget": { "currency": "USD", "range_min": 5000, "range_max": 5000, "confidence": 0.9 },
-    "entities": { "company": "Acme Corp", "contact_name": "John" },
-    "summary": "Sales lead from Acme Corp requesting demo, $5K/mo budget.",
-    "next_best_actions": [
-      { "action_type": "create_meeting", "confidence": 0.95, "payload": { "title": "Demo with Acme Corp", "date": "2026-02-10", "start_time": "14:00", "end_time": "15:00" } },
-      { "action_type": "send_slack_summary", "confidence": 0.85, "payload": { "message": "Intent: sales lead\nCompany: Acme Corp\n..." } }
-    ]
-  },
-  "evidence": [{ "doc": "02_pricing.md", "chunk": 1, "score": 0.82, "text": "..." }],
-  "reply_draft": { "text": "Hi John, thanks for reaching out...", "citations": ["02_pricing.md#1"] },
-  "actions_preview": [{ "action_type": "create_meeting", "preview": "Calendar: Demo with Acme Corp on 2026-02-10 from 14:00 to 15:00" }]
-}
-```
+| 端点 | 说明 |
+|---|---|
+| `POST /voice` | 语音日程（音频）。支持 `session_id` 用于冲突改期。 |
+| `POST /calendar/text` | 文字日程。支持 `session_id` 用于冲突改期。 |
 
 #### 知识库
 
-将 `.md` 文件放入 `knowledge_base/` 目录。项目已包含 10 篇示例文档，涵盖产品概览、定价、FAQ、支持策略、API 参考、入门指南和安全合规。
+将 `.md` 文件放入 `knowledge_base/` 目录。项目已包含 10 篇示例文档，涵盖产品概览、定价、FAQ、支持政策、API 参考、入门指南与安全合规。
 
 重新索引：`POST /autopilot/ingest`
 
@@ -286,8 +296,8 @@ python -m pytest tests/test_autopilot.py -v
 - **Playwright 受网络影响**：网络慢会导致 Calendar 加载延迟
 - **Whisper CPU 模式较慢**：`small` 模型较慢，可切换 `tiny` 提速
 - **仅支持单日事件**：暂不支持跨日事件
-- **连接器需配置凭据**：Slack/Linear/Email 需要在 `.env` 中填写有效凭据才能执行（dry_run 预览始终可用）
+- **连接器需配置凭据**：Slack/Linear/Email 需在 `.env` 中填写有效凭据才能执行（dry_run 预览始终可用）
 
 ## 仓库地址
 
-- GitHub: https://github.com/Jayden3422/voice-assistant
+- GitHub: https://github.com/Jayden3422/Voice-Autopilot

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
-import { Button, message as AntMessage } from "antd";
+import { Button, Input, message as AntMessage } from "antd";
 import "./index.scss";
 import * as api from "../../utils/api";
 import { useI18n } from "../../i18n/LanguageContext.jsx";
 import { ENABLE_BROWSER_TTS, TTS_MODE } from "../../config/tts.js";
+import { SendOutlined } from "@ant-design/icons";
 
 const Home = () => {
   const { t, lang, setLangLocked } = useI18n();
@@ -13,8 +14,43 @@ const Home = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isGreeting, setIsGreeting] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [textInput, setTextInput] = useState("");
   const mediaRecorderRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const sessionIdRef = useRef(
+    typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `sess-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  );
+
+  const appendMessagesFromResponse = (data) => {
+    const { user_text, ai_text, audio_base64, session_id } = data || {};
+    if (session_id) {
+      sessionIdRef.current = session_id;
+    }
+    const newMessages = [];
+    if (user_text) {
+      newMessages.push({
+        id: Date.now(),
+        role: "user",
+        text: user_text,
+      });
+    }
+    if (ai_text) {
+      newMessages.push({
+        id: Date.now() + 1,
+        role: "ai",
+        text: ai_text,
+      });
+    }
+    if (newMessages.length > 0) {
+      setMessages((prev) => [...prev, ...newMessages]);
+    }
+    if (audio_base64) {
+      setIsPlaying(true);
+      playBase64Audio(audio_base64).finally(() => setIsPlaying(false));
+    }
+  };
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -117,35 +153,39 @@ const Home = () => {
     const formData = new FormData();
     formData.append("audio", blob, "voice.webm");
     formData.append("lang", lang);
+    formData.append("session_id", sessionIdRef.current);
 
     setIsProcessing(true);
     await api
       .postAPI("/voice", formData)
       .then((res) => {
         const data = res && res.data ? res.data : res || {};
-        const { user_text, ai_text, audio_base64 } = data;
-        const newMessages = [];
-        if (user_text) {
-          newMessages.push({
-            id: Date.now(),
-            role: "user",
-            text: user_text,
-          });
-        }
-        if (ai_text) {
-          newMessages.push({
-            id: Date.now() + 1,
-            role: "ai",
-            text: ai_text,
-          });
-        }
-        if (newMessages.length > 0) {
-          setMessages((prev) => [...prev, ...newMessages]);
-        }
-        if (audio_base64) {
-          setIsPlaying(true);
-          playBase64Audio(audio_base64).finally(() => setIsPlaying(false));
-        }
+        appendMessagesFromResponse(data);
+      })
+      .catch((err) => {
+        console.error(`${t("errors.processingFailed")}:`, err);
+        AntMessage.error(t("errors.processingFailed"));
+      })
+      .finally(() => {
+        setIsProcessing(false);
+      });
+  };
+
+  const sendTextToBackend = async () => {
+    const text = textInput.trim();
+    if (!text) return;
+    setIsProcessing(true);
+    setTextInput("");
+    await api
+      .postAPI("/calendar/text", {
+        text,
+        lang,
+        session_id: sessionIdRef.current,
+        include_audio: true,
+      })
+      .then((res) => {
+        const data = res && res.data ? res.data : res || {};
+        appendMessagesFromResponse(data);
       })
       .catch((err) => {
         console.error(`${t("errors.processingFailed")}:`, err);
@@ -263,6 +303,32 @@ const Home = () => {
             disabled={isProcessing || isGreeting || isPlaying}
           >
             {isRecording ? t("home.stopRecording") : t("home.startRecording")}
+          </Button>
+        </div>
+        <div className="chat-input-bar">
+          <Input.TextArea
+            rows={1}
+            autoSize={{ minRows: 1, maxRows: 3 }}
+            placeholder={t("home.textPlaceholder")}
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            onPressEnter={(e) => {
+              if (e.shiftKey) return;
+              e.preventDefault();
+              if (!isProcessing && !isGreeting && !isPlaying) {
+                sendTextToBackend();
+              }
+            }}
+            disabled={isProcessing || isGreeting || isPlaying}
+          />
+          <Button
+            type="primary"
+            icon={<SendOutlined />}
+            onClick={sendTextToBackend}
+            loading={isProcessing}
+            disabled={!textInput.trim() || isProcessing || isGreeting || isPlaying}
+          >
+            {t("home.sendText")}
           </Button>
         </div>
       </div>

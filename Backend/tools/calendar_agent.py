@@ -151,7 +151,7 @@ def _parse_event_time_from_label(
 
 class GoogleCalendarAgent:
   # 持久化 Chrome Profile 操作 Google Calendar
-  GOTO_TIMEOUT_MS = 30_000  # 1 分钟
+  GOTO_TIMEOUT_MS = 20_000  # 20秒
   SMALL_WAIT_MS = 2_000
 
   def __init__(self, lang: str = "zh"):

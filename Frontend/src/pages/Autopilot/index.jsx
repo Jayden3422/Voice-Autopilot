@@ -18,7 +18,6 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   ExclamationCircleOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import { useI18n } from "../../i18n/LanguageContext.jsx";
 import * as api from "../../utils/api";
@@ -34,6 +33,26 @@ const STATUS_ICONS = {
   skipped: <CloseCircleOutlined style={{ color: "#999" }} />,
 };
 
+const escapeHtml = (str = "") =>
+  str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const formatPlainTextAsHtml = (text = "") => {
+  if (!text) return "";
+  return text
+    .trim()
+    .split("\n\n")
+    .map((block) => {
+      const lines = block.split("\n").map((line) => escapeHtml(line));
+      return `<p>${lines.join("<br/>")}</p>`;
+    })
+    .join("");
+};
+
 const Autopilot = () => {
   const { t, lang } = useI18n();
   const [inputText, setInputText] = useState("");
@@ -44,10 +63,14 @@ const Autopilot = () => {
   const [confirmResult, setConfirmResult] = useState(null);
   const [actionChecks, setActionChecks] = useState({});
   const [editedActions, setEditedActions] = useState([]);
-  const [replyDraft, setReplyDraft] = useState("");
+  const [replyDraft, setReplyDraft] = useState({});
+  const [rescheduleInputs, setRescheduleInputs] = useState({});
+  const [rescheduleLoading, setRescheduleLoading] = useState({});
+  const [rescheduleRecordingIndex, setRescheduleRecordingIndex] = useState(null);
   const mediaRecorderRef = useRef(null);
+  const rescheduleRecorderRef = useRef(null);
 
-  const handleRun = async (mode, audioB64 = null) => {
+  const handleRun = async (mode, audioB64 = null, overrideText = null) => {
     setIsProcessing(true);
     setRunResult(null);
     setConfirmResult(null);
@@ -56,12 +79,12 @@ const Autopilot = () => {
       if (mode === "audio") {
         body.audio_base64 = audioB64;
       } else {
-        body.text = inputText;
+        body.text = overrideText ?? inputText;
       }
       const res = await api.postAPI("/autopilot/run", body);
       const data = res?.data || res || {};
       setRunResult(data);
-      setReplyDraft(data.reply_draft?.text || "");
+      setReplyDraft(data.reply_draft || {});
       // Init action checks - all checked by default
       const checks = {};
       (data.actions_preview || []).forEach((_, i) => {
@@ -136,6 +159,92 @@ const Autopilot = () => {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current = null;
       setIsRecording(false);
+    }
+  };
+
+  const appendToAnalyzeInput = (text) => {
+    if (!text) return "";
+    const next = inputText ? `${inputText}\n${text}` : text;
+    setInputText(next);
+    return next;
+  };
+
+  const buildRescheduleLine = (action, rawText) => {
+    const payload = action?.payload || {};
+    const title = payload.title || (lang === "zh" ? "日程安排" : "Meeting");
+    const date = payload.date || "";
+    const start = payload.start_time || "";
+    const end = payload.end_time || "";
+    const tz = "America/Toronto";
+    if (lang === "zh") {
+      return `改期更新：将「${title}」调整为 ${date} ${start}-${end}（时区：${tz}）。`.trim();
+    }
+    return `Reschedule update: move "${title}" to ${date} ${start}-${end} (Timezone: ${tz}).`.trim();
+  };
+
+  const handleReschedule = async (index, mode, audioB64 = null) => {
+    const action = editedActions[index];
+    if (!action) return;
+    setRescheduleLoading((prev) => ({ ...prev, [index]: true }));
+    try {
+      const body = { mode, locale: lang, action };
+      if (mode === "audio") {
+        body.audio_base64 = audioB64;
+      } else {
+        body.text = (rescheduleInputs[index] || "").trim();
+      }
+      const res = await api.postAPI("/autopilot/adjust-time", body);
+      const data = res?.data || res || {};
+      const rawText = (data.user_text || body.text || "").trim();
+      const normalizedLine = data.action ? buildRescheduleLine(data.action, rawText) : rawText;
+      if (normalizedLine) {
+        const nextInput = appendToAnalyzeInput(normalizedLine);
+        setRescheduleInputs((prev) => ({ ...prev, [index]: "" }));
+        await handleRun("text", null, nextInput);
+      }
+    } catch (err) {
+      console.error("Reschedule error:", err);
+      AntMessage.error(t("autopilot.rescheduleError"));
+    } finally {
+      setRescheduleLoading((prev) => ({ ...prev, [index]: false }));
+    }
+  };
+
+  const handleRescheduleStartRecording = async (index) => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      AntMessage.error(t("errors.browserNotSupported"));
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const b64 = reader.result.split(",")[1];
+          handleReschedule(index, "audio", b64);
+        };
+        reader.readAsDataURL(blob);
+      };
+      recorder.start();
+      rescheduleRecorderRef.current = recorder;
+      setRescheduleRecordingIndex(index);
+    } catch {
+      AntMessage.error(t("errors.micDenied"));
+    }
+  };
+
+  const handleRescheduleStopRecording = () => {
+    if (rescheduleRecorderRef.current) {
+      rescheduleRecorderRef.current.stop();
+      rescheduleRecorderRef.current = null;
+      setRescheduleRecordingIndex(null);
     }
   };
 
@@ -266,12 +375,36 @@ const Autopilot = () => {
               )}
               <Divider />
               <Text strong>{t("autopilot.replyDraft")}:</Text>
-              <TextArea
-                rows={4}
-                value={replyDraft}
-                onChange={(e) => setReplyDraft(e.target.value)}
-                style={{ marginTop: 8 }}
-              />
+              <div className="autopilot-email-preview" style={{ marginTop: 8 }}>
+                {(replyDraft.from || replyDraft.to || replyDraft.subject) && (
+                  <div className="autopilot-email-meta">
+                    {replyDraft.from && (
+                      <div>
+                        <Text strong>{t("autopilot.emailFrom")}:</Text>{" "}
+                        <Text>{replyDraft.from}</Text>
+                      </div>
+                    )}
+                    {replyDraft.to && (
+                      <div>
+                        <Text strong>{t("autopilot.emailTo")}:</Text>{" "}
+                        <Text>{replyDraft.to}</Text>
+                      </div>
+                    )}
+                    {replyDraft.subject && (
+                      <div>
+                        <Text strong>{t("autopilot.emailSubject")}:</Text>{" "}
+                        <Text>{replyDraft.subject}</Text>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div
+                  className="autopilot-email-body"
+                  dangerouslySetInnerHTML={{
+                    __html: replyDraft.html || formatPlainTextAsHtml(replyDraft.text || ""),
+                  }}
+                />
+              </div>
               {runResult.reply_draft?.citations?.length > 0 && (
                 <div style={{ marginTop: 4 }}>
                   <Text type="secondary">
@@ -369,6 +502,49 @@ const Autopilot = () => {
                   )}
                   {r.result?.error && <Text type="danger">{r.result.error}</Text>}
                   {r.result?.message && <Text>{r.result.message}</Text>}
+                  {r.status === "blocked" && r.action_type === "create_meeting" && (
+                    <div className="autopilot-reschedule">
+                      <Input
+                        placeholder={t("autopilot.reschedulePlaceholder")}
+                        value={rescheduleInputs[i] || ""}
+                        onChange={(e) =>
+                          setRescheduleInputs((prev) => ({ ...prev, [i]: e.target.value }))
+                        }
+                        onPressEnter={(e) => {
+                          e.preventDefault();
+                          if ((rescheduleInputs[i] || "").trim()) {
+                            handleReschedule(i, "text");
+                          }
+                        }}
+                        disabled={rescheduleLoading[i]}
+                      />
+                      <Space>
+                        <Button
+                          type="primary"
+                          onClick={() => handleReschedule(i, "text")}
+                          loading={rescheduleLoading[i]}
+                          disabled={!(rescheduleInputs[i] || "").trim()}
+                        >
+                          {t("autopilot.reschedule")}
+                        </Button>
+                        <Button
+                          type={rescheduleRecordingIndex === i ? "default" : "primary"}
+                          danger={rescheduleRecordingIndex === i}
+                          icon={<AudioOutlined />}
+                          onClick={
+                            rescheduleRecordingIndex === i
+                              ? handleRescheduleStopRecording
+                              : () => handleRescheduleStartRecording(i)
+                          }
+                          disabled={rescheduleLoading[i]}
+                        >
+                          {rescheduleRecordingIndex === i
+                            ? t("autopilot.stopRecording")
+                            : t("autopilot.startRecording")}
+                        </Button>
+                      </Space>
+                    </div>
+                  )}
                 </div>
               ))}
             </Card>
