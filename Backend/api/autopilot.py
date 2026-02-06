@@ -1,5 +1,6 @@
 """FastAPI routes for the Autopilot system."""
 
+import asyncio
 import base64
 import json
 import logging
@@ -22,8 +23,6 @@ from store.runs import create_run, update_run, get_run
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/autopilot", tags=["autopilot"])
-
-EMAIL_REGEX = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 
 
 # --- Request / Response Models ---
@@ -83,12 +82,6 @@ async def autopilot_run(req: AutopilotRunRequest):
 
         # Step 2: Extraction via Tool Calling
         extracted = await extract_autopilot_json(transcript, run_id=run_id)
-        entities = extracted.get("entities") or {}
-        if not entities.get("email"):
-            fallback_email = _extract_email_fallback(transcript)
-            if fallback_email:
-                entities["email"] = fallback_email
-                extracted["entities"] = entities
         update_run(run_id, extracted_json=extracted, status="extracted")
 
         # Step 3: RAG retrieval
@@ -99,25 +92,36 @@ async def autopilot_run(req: AutopilotRunRequest):
 
         # Step 4: Reply draft
         draft = await generate_reply_draft(client, transcript, extracted, evidence, run_id=run_id)
-        email_content = _build_email_content(draft, extracted)
+
+        # Build email_content only if there's potential for email action
+        entities = extracted.get("entities") or {}
+        has_email = bool(entities.get("email"))
+        email_content = None
+        if has_email:
+            email_content = _build_email_content(draft, extracted)
+
         reply_payload = {
             "text": draft.get("reply_text", ""),
             "reply_text": draft.get("reply_text", ""),
             "citations": draft.get("citations", []),
-            "html": email_content.get("body_html", ""),
-            "subject": email_content.get("subject", ""),
-            "to": email_content.get("to", ""),
-            "from": email_content.get("from_display", ""),
-            "body_text": email_content.get("body_text", ""),
+            "html": email_content.get("body_html", "") if email_content else "",
+            "subject": email_content.get("subject", "") if email_content else "",
+            "to": email_content.get("to", "") if email_content else "",
+            "from": email_content.get("from_display", "") if email_content else "",
+            "body_text": email_content.get("body_text", "") if email_content else "",
         }
         update_run(run_id, reply_draft=reply_payload, status="drafted")
 
-        # Step 5: Enrich & filter actions, then dry_run preview
+        # Step 5: Enrich & filter actions, then dry_run preview (parallelized)
         actions = extracted.get("next_best_actions", [])
         actions = await _enrich_actions(actions, extracted, draft, email_content, transcript)
+
+        # Parallel dry_run for all actions
+        preview_tasks = [dry_run_action(action) for action in actions]
+        previews = await asyncio.gather(*preview_tasks)
+
         actions_preview = []
-        for action in actions:
-            preview = await dry_run_action(action)
+        for action, preview in zip(actions, previews):
             actions_preview.append({
                 **action,
                 "preview": preview.get("preview", ""),
@@ -157,10 +161,7 @@ async def autopilot_confirm(req: AutopilotConfirmRequest):
     actions = list(req.actions or [])
     extracted_json = run.get("extracted_json", {}) if isinstance(run.get("extracted_json"), dict) else {}
     locale = extracted_json.get("conversation_language", "en") if isinstance(extracted_json, dict) else "en"
-    transcript = run.get("transcript", "") if isinstance(run, dict) else ""
     summary = extracted_json.get("summary", "") if isinstance(extracted_json, dict) else ""
-
-    actions = await _fill_calendar_payloads_from_transcript(actions, transcript, locale)
 
     # Precompute which actions are executable
     action_meta = []
@@ -553,39 +554,6 @@ def _prepare_calendar_payload_for_preview(payload: dict, summary: str, lang: str
     return payload
 
 
-async def _fill_calendar_payloads_from_transcript(actions: list[dict], transcript: str, lang: str) -> list[dict]:
-    if not transcript:
-        return actions
-    needs = any(
-        a.get("action_type") == "create_meeting"
-        and (not (a.get("payload") or {}).get("date") or not (a.get("payload") or {}).get("start_time"))
-        for a in actions
-    )
-    if not needs:
-        return actions
-    try:
-        extracted = await extract_calendar_event(transcript, lang=lang)
-    except Exception:
-        return actions
-
-    for action in actions:
-        if action.get("action_type") != "create_meeting":
-            continue
-        payload = {**(action.get("payload") or {})}
-        if not payload.get("date") and extracted.get("date"):
-            payload["date"] = extracted.get("date")
-        if not payload.get("start_time") and extracted.get("start_time"):
-            payload["start_time"] = extracted.get("start_time")
-        if not payload.get("end_time") and extracted.get("end_time"):
-            payload["end_time"] = extracted.get("end_time")
-        if not payload.get("title") and extracted.get("title"):
-            payload["title"] = extracted.get("title")
-        if "attendees" not in payload and "attendees" in extracted:
-            payload["attendees"] = extracted.get("attendees", [])
-        action["payload"] = payload
-    return actions
-
-
 def _finalize_calendar_payload(payload: dict, summary: str, lang: str, current_dt) -> dict:
     """Fill missing fields with defaults right before execution."""
     from datetime import datetime, timedelta
@@ -610,6 +578,8 @@ def _finalize_calendar_payload(payload: dict, summary: str, lang: str, current_d
     if "attendees" not in payload:
         payload["attendees"] = []
     return payload
+
+
 
 
 def _build_rag_query(extracted: dict) -> str:
@@ -690,13 +660,6 @@ def _normalize_lang(lang: str | None) -> str:
     if not lang:
         return "en"
     return "en" if lang.lower().startswith("en") else "zh"
-
-
-def _extract_email_fallback(text: str) -> str | None:
-    if not text:
-        return None
-    match = EMAIL_REGEX.search(text)
-    return match.group(0) if match else None
 
 
 def _starts_with_greeting(text: str, lang: str) -> bool:

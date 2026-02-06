@@ -15,10 +15,17 @@ Rules:
 7. `entities` should capture company name, contact name, email, phone if mentioned; use null for each unknown field.
 8. `summary` must be a concise 1-3 sentence summary of the conversation.
 9. `next_best_actions` must contain at least one action. Each action MUST have `requires_confirmation: true` by default.
-   - Use `create_meeting` if the user wants to schedule something. Payload MUST include: title, date (YYYY-MM-DD), start_time (HH:MM 24h), end_time (HH:MM 24h), attendees (array).
-     CRITICAL: Resolve ALL relative dates to absolute YYYY-MM-DD based on the current date above.
-     Examples: "tomorrow"/"明天" → actual date, "next Tuesday"/"下周二" → actual date, "后天" → actual date.
-     - If the user does not specify a meeting duration, assume 60 minutes (end_time = start_time + 1 hour).
+   - Use `create_meeting` if the user wants to schedule something or if scheduling is mentioned in the conversation.
+     **CRITICAL: You MUST extract complete calendar information in ONE pass. Do NOT leave date/time fields empty.**
+     Payload MUST include:
+       * `title` (string, required): Meeting title. Use conversation summary if not explicitly mentioned.
+       * `date` (string, required): Meeting date in YYYY-MM-DD format.
+         Resolve ALL relative dates to absolute YYYY-MM-DD based on the current date above ({current_datetime}).
+         Examples: "tomorrow"/"明天" → next day's date, "next Tuesday"/"下周二" → actual date of next Tuesday, "后天" → day after tomorrow's actual date.
+       * `start_time` (string, required): Meeting start time in HH:MM format (24-hour). Extract from conversation.
+       * `end_time` (string, required): Meeting end time in HH:MM format (24-hour).
+         If duration not specified, assume 60 minutes (end_time = start_time + 1 hour).
+       * `attendees` (array of strings): List of attendee email addresses. Use [] if none mentioned.
      - If the user provides a reschedule/update, use the latest date/time as the final schedule and override earlier times.
    - Use `send_slack_summary` if the conversation warrants team notification. Payload should include: channel (optional), message.
    - Use `send_email_followup` if a follow-up email is appropriate. Payload should include: to, subject, body.
