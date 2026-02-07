@@ -18,7 +18,7 @@ from chat.calendar_extractor import extract_calendar_event
 from chat.reply_drafter import generate_reply_draft
 from rag.retrieve import retrieve
 from actions.dispatcher import dry_run_action, execute_action
-from store.runs import create_run, update_run, get_run
+from store.runs import create_run, update_run, get_run, list_runs
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ async def autopilot_run(req: AutopilotRunRequest):
     else:
         raise HTTPException(status_code=400, detail="mode must be 'audio' or 'text'")
 
-    create_run(run_id, req.mode, raw_input or "")
+    create_run(run_id, req.mode, raw_input or "", run_type="autopilot")
 
     try:
         # Step 1: Transcription
@@ -268,7 +268,9 @@ async def autopilot_confirm(req: AutopilotConfirmRequest):
     for i in range(len(actions)):
         results.append(results_by_index.get(i, {"action_type": actions[i].get("action_type", "none"), "status": "skipped", "result": {}}))
 
-    update_run(req.run_id, actions_json=results, status="executed")
+    # Determine final status based on execution results
+    final_status = _determine_final_status(results)
+    update_run(req.run_id, actions_json=results, status=final_status)
 
     return {"run_id": req.run_id, "results": results}
 
@@ -339,6 +341,103 @@ async def autopilot_ingest():
     client = get_openai_client()
     result = await ingest_knowledge_base(client)
     return {"status": "ok", **result}
+
+
+# --- GET /autopilot/runs ---
+
+@router.get("/runs")
+async def get_autopilot_runs(limit: int = 50, offset: int = 0, run_type: Optional[str] = None):
+    """Get a paginated list of autopilot run records."""
+    if limit < 1 or limit > 100:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 100")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative")
+    if run_type and run_type not in ("autopilot", "voice_schedule"):
+        raise HTTPException(status_code=400, detail="run_type must be 'autopilot' or 'voice_schedule'")
+
+    runs = list_runs(limit=limit, offset=offset, run_type=run_type)
+    return {"runs": runs, "limit": limit, "offset": offset, "run_type": run_type}
+
+
+# --- GET /autopilot/runs/{run_id} ---
+
+@router.get("/runs/{run_id}")
+async def get_autopilot_run_detail(run_id: str):
+    """Get detailed information about a specific autopilot run."""
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+    return run
+
+
+# --- POST /autopilot/retry/{run_id} ---
+
+@router.post("/retry/{run_id}")
+async def autopilot_retry(run_id: str):
+    """Retry failed actions from a previous run."""
+    run = get_run(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+
+    # Get previous actions and extracted data
+    previous_actions = run.get("actions_json", [])
+    if not previous_actions or not isinstance(previous_actions, list):
+        raise HTTPException(status_code=400, detail="No actions found to retry")
+
+    extracted_json = run.get("extracted_json", {})
+    if not isinstance(extracted_json, dict):
+        extracted_json = {}
+
+    locale = extracted_json.get("conversation_language", "en")
+    summary = extracted_json.get("summary", "")
+
+    # Filter actions that failed or were blocked
+    actions_to_retry = []
+    for idx, action in enumerate(previous_actions):
+        status = action.get("status", "")
+        if status in ("failed", "blocked", "error"):
+            # Prepare action for retry
+            retry_action = {
+                "action_type": action.get("action_type"),
+                "payload": action.get("payload", {}),
+                "requires_confirmation": False,  # Skip confirmation for retry
+                "confirmed": True,
+            }
+            actions_to_retry.append((idx, retry_action))
+
+    if not actions_to_retry:
+        raise HTTPException(status_code=400, detail="No failed actions to retry")
+
+    # Execute retry actions
+    results = list(previous_actions)  # Copy previous results
+    from utils.timezone import now as now_toronto
+    current_dt = now_toronto()
+
+    for idx, action in actions_to_retry:
+        action_type = action.get("action_type", "none")
+        try:
+            # Special handling for calendar actions
+            if action_type == "create_meeting":
+                payload = action.get("payload") or {}
+                payload = _enrich_calendar_title(payload, summary, extracted_json, locale)
+                payload = _finalize_calendar_payload(payload, summary, locale, current_dt)
+                action["payload"] = payload
+
+            result = await execute_action(action, lang=locale)
+            results[idx] = result
+        except Exception as e:
+            logger.exception("Retry action execution error for %s", action_type)
+            results[idx] = {
+                "action_type": action_type,
+                "status": "failed",
+                "result": {"error": str(e)[:300]}
+            }
+
+    # Determine final status after retry
+    final_status = _determine_final_status(results)
+    update_run(run_id, actions_json=results, status=final_status)
+
+    return {"run_id": run_id, "results": results, "status": final_status}
 
 
 # --- Helpers ---
@@ -725,6 +824,48 @@ def _merge_extracted_actions(extracted: dict, enriched_actions: list[dict]) -> d
         ex["payload"] = payload
     merged["next_best_actions"] = extracted_actions
     return merged
+
+
+def _determine_final_status(results: list[dict]) -> str:
+    """
+    Determine the final status based on action execution results.
+
+    Returns:
+        - "conflict": if calendar event creation had a conflict
+        - "error": if any executed action failed
+        - "executed": if all executed actions succeeded
+        - "previewed": if no actions were executed (all skipped/not confirmed)
+    """
+    # Check if any actions were actually executed (not skipped)
+    executed_results = [r for r in results if r.get("status") not in ("skipped",)]
+
+    if not executed_results:
+        # No actions were executed
+        return "previewed"
+
+    # Check for calendar conflicts
+    for result in results:
+        if result.get("action_type") == "create_meeting":
+            status = result.get("status", "")
+            result_data = result.get("result", {})
+
+            # Check if it's a conflict
+            if status == "blocked" or "conflict" in str(result_data).lower():
+                return "conflict"
+
+            # Check if calendar action failed
+            if status == "failed":
+                error_msg = str(result_data.get("error", "")).lower()
+                if "conflict" in error_msg or "already" in error_msg:
+                    return "conflict"
+
+    # Check if any executed action failed
+    for result in results:
+        if result.get("status") == "failed":
+            return "error"
+
+    # All executed actions succeeded
+    return "executed"
 
 
 def _normalize_lang(lang: str | None) -> str:

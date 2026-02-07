@@ -22,6 +22,7 @@ from tools.speech import transcribe_audio, synthesize_speech
 from chat.calendar_extractor import extract_calendar_event
 from tools.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
+from store.runs import create_run, update_run
 
 app = FastAPI(title="Voice Schedule Assistant")
 app.include_router(autopilot_router)
@@ -133,7 +134,7 @@ async def _build_voice_response(user_text: str, ai_text: str, lang: str, session
   )
 
 
-async def _process_calendar_text(user_text: str, normalized_lang: str, session_id: str | None, include_audio: bool) -> VoiceResponse:
+async def _process_calendar_text(user_text: str, normalized_lang: str, session_id: str | None, include_audio: bool, input_type: str = "text") -> VoiceResponse:
   msgs = MESSAGES[normalized_lang]
   if not user_text.strip():
     return await _build_voice_response(
@@ -147,6 +148,26 @@ async def _process_calendar_text(user_text: str, normalized_lang: str, session_i
   if not session_id:
     session_id = str(uuid.uuid4())
 
+  # Create or update run record
+  run_id = session_id
+  from store.runs import get_run
+  existing_run = get_run(run_id)
+
+  if existing_run:
+    # Append to existing transcript (for rescheduling scenarios)
+    existing_transcript = existing_run.get("transcript", "")
+    if existing_transcript:
+      full_transcript = f"{existing_transcript}\n---\n{user_text}"
+    else:
+      full_transcript = user_text
+  else:
+    # First time - create new run
+    full_transcript = user_text
+    try:
+      create_run(run_id, input_type, user_text, run_type="voice_schedule")
+    except Exception:
+      pass
+
   session = _get_voice_session(session_id)
   context_event = session.get("event") if session and session.get("awaiting_update") else None
 
@@ -156,6 +177,8 @@ async def _process_calendar_text(user_text: str, normalized_lang: str, session_i
       lang=normalized_lang,
       context_event=context_event,
     )
+    update_run(run_id, transcript=full_transcript, extracted_json=extracted, status="extracted")
+
     cmd = CalendarCommand(
       date=datetime.strptime(extracted["date"], "%Y-%m-%d").date(),
       start_time=datetime.strptime(extracted["start_time"], "%H:%M").time(),
@@ -164,6 +187,7 @@ async def _process_calendar_text(user_text: str, normalized_lang: str, session_i
     )
   except Exception as e:
     logger.exception("%s: %s", _msg(normalized_lang, "nlp_failed", LOG_MESSAGES), e)
+    update_run(run_id, status="error", error=str(e)[:1000])
     ai_text = msgs["nlp_failed"]
     return await _build_voice_response(user_text, ai_text, normalized_lang, session_id, include_audio)
 
@@ -178,6 +202,7 @@ async def _process_calendar_text(user_text: str, normalized_lang: str, session_i
       title=cmd.title,
     )
     _set_voice_session(session_id, extracted, awaiting_update=False)
+    update_run(run_id, status="executed", actions_json={"action": "create_calendar", "success": True, "result": ai_text})
   elif result.conflict:
     ai_text = msgs["conflict_retry"].format(
       date=cmd.date.strftime("%Y-%m-%d"),
@@ -185,9 +210,11 @@ async def _process_calendar_text(user_text: str, normalized_lang: str, session_i
       end=cmd.end_time.strftime("%H:%M"),
     )
     _set_voice_session(session_id, extracted, awaiting_update=True)
+    update_run(run_id, status="conflict", actions_json={"action": "create_calendar", "conflict": True})
   else:
     ai_text = result.message or msgs["create_failed"]
     _set_voice_session(session_id, extracted, awaiting_update=False)
+    update_run(run_id, status="error", error=result.message or "Failed to create calendar event")
 
   return await _build_voice_response(user_text, ai_text, normalized_lang, session_id, include_audio)
 
@@ -239,14 +266,14 @@ async def handle_voice(
     raise HTTPException(status_code=400, detail=msgs["no_audio"])
 
   if text and text.strip():
-    return await _process_calendar_text(text.strip(), normalized_lang, session_id, bool(include_audio))
+    return await _process_calendar_text(text.strip(), normalized_lang, session_id, bool(include_audio), input_type="text")
 
   temp_path = save_temp_file(audio)
 
   try:
     # STT
     user_text = transcribe_audio(temp_path, lang=normalized_lang)
-    return await _process_calendar_text(user_text, normalized_lang, session_id, True)
+    return await _process_calendar_text(user_text, normalized_lang, session_id, True, input_type="audio")
 
   except HTTPException:
     raise
@@ -268,6 +295,7 @@ async def handle_calendar_text(request: CalendarTextRequest):
     normalized_lang,
     request.session_id,
     bool(request.include_audio),
+    input_type="text",
   )
 
 if __name__ == "__main__":
