@@ -71,7 +71,7 @@ async def autopilot_run(req: AutopilotRunRequest):
         # Step 1: Transcription
         transcript = ""
         if req.mode == "audio":
-            transcript = await _transcribe_audio(req.audio_base64)
+            transcript = await _transcribe_audio(req.audio_base64, lang=_normalize_lang(req.locale))
         else:
             transcript = req.text.strip()
 
@@ -287,7 +287,7 @@ async def autopilot_adjust_time(req: AutopilotAdjustRequest):
     if req.mode == "audio":
         if not req.audio_base64:
             raise HTTPException(status_code=400, detail="audio_base64 is required for audio mode")
-        user_text = await _transcribe_audio(req.audio_base64)
+        user_text = await _transcribe_audio(req.audio_base64, lang=_normalize_lang(req.locale))
     elif req.mode == "text":
         if not req.text:
             raise HTTPException(status_code=400, detail="text is required for text mode")
@@ -442,7 +442,7 @@ async def autopilot_retry(run_id: str):
 
 # --- Helpers ---
 
-async def _transcribe_audio(audio_b64: str) -> str:
+async def _transcribe_audio(audio_b64: str, lang: str = "en") -> str:
     """Decode base64 audio and run Whisper STT."""
     import tempfile
     from tools.speech import transcribe_audio
@@ -453,7 +453,7 @@ async def _transcribe_audio(audio_b64: str) -> str:
         tmp_path = f.name
 
     try:
-        text = transcribe_audio(tmp_path, lang="en")
+        text = transcribe_audio(tmp_path, lang=lang)
         return text.strip()
     finally:
         try:

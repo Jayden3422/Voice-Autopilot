@@ -75,6 +75,7 @@ RAG 检索依据文档
 ```
 
 冲突处理支持只改时间：`"改到 3 点"`。
+Home 页支持录音中的实时转写显示（浏览器 SpeechRecognition）；点击停止后再上传音频到后端 `/voice` 做最终识别与执行。
 
 ### 2. 销售/支持 Autopilot
 
@@ -89,6 +90,7 @@ RAG 检索依据文档
 ```
 
 自动增强示例：日历标题可拼接 `{公司} - {产品} - {预算}`。
+Autopilot 页中，`Start Recording` 仅用于实时转文字并写入输入框；是否分析由用户手动点击“分析”触发。
 
 ---
 
@@ -118,7 +120,7 @@ Voice-Autopilot/
 │       ├── utils/               # Axios 封装
 │       └── router/              # 路由配置
 ├── Backend/
-│   ├── main.py                  # FastAPI 入口（/voice, /calendar/text）
+│   ├── main.py                  # FastAPI 入口（/voice, /voice/ws, /calendar/text, /tts）
 │   ├── api/autopilot.py         # Autopilot 编排与 API
 │   ├── chat/                    # 提取、草稿、Prompt
 │   ├── rag/                     # 索引与检索
@@ -271,6 +273,8 @@ SMTP_SSL=false
 SMTP_TIMEOUT=30
 ```
 
+说明：流式 STT/TTS 与分段参数（如 `STREAM_STT_*`、`TTS_SEGMENT_*`）可按需在 `.env.example` 中启用与调优。
+
 ---
 
 ## ▶️ 运行
@@ -298,6 +302,7 @@ python main.py
 ### 2. 语音/文字日程（AI 驱动）
 
 - 支持中英文自然时间表达（如“明天/下周三/next Tuesday/2pm to 3pm”）
+- Home 页面录音时可实时显示转写文本，停止后执行后端识别与日程处理
 - Tool Calling 提取日程槽位并校验
 - 自动冲突检测
 - 冲突时支持语音或文字改期
@@ -309,6 +314,7 @@ python main.py
 页面：`/autopilot`
 
 - 输入文本或音频，自动提取意图/紧急度/预算/实体
+- 主录音按钮用于实时转写到输入框，不会自动触发分析
 - RAG 检索证据并生成带引用回复草稿
 - 自动补全动作 payload，支持人工编辑
 - 默认含 `send_slack_summary`，有邮箱时自动添加 `send_email_followup`
@@ -347,6 +353,7 @@ python main.py
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/voice` | POST | 语音日程（支持 `session_id` 冲突改期） |
+| `/voice/ws` | WebSocket | 流式语音通道（支持 `stt_partial/stt_final` 与分段 TTS 事件） |
 | `/calendar/text` | POST | 文字日程（支持 `session_id` 冲突改期） |
 | `/autopilot/run` | POST | 分析对话并返回动作预览 |
 | `/autopilot/confirm` | POST | 执行确认后的动作 |
