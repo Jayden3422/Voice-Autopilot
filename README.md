@@ -430,6 +430,14 @@ To (re)index: `POST /autopilot/ingest`
 
 All runs are stored in `Backend/autopilot.db` (SQLite) with full traceability: input → transcript → extraction → evidence → draft → actions → execution status → errors.
 
+### 5. History Record
+
+![image-20260207003609207](assets/image-20260207003609207.png)
+
+![image-20260207003643433](assets/image-20260207003643433.png)
+
+![image-20260207003627971](assets/image-20260207003627971.png)
+
 ## Testing
 
 ### Running Tests

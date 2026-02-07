@@ -9,12 +9,12 @@ from store.db import get_connection
 logger = logging.getLogger(__name__)
 
 
-def create_run(run_id: str, input_type: str, raw_input: str) -> None:
+def create_run(run_id: str, input_type: str, raw_input: str, run_type: str = "autopilot") -> None:
     conn = get_connection()
     try:
         conn.execute(
-            "INSERT INTO runs (run_id, input_type, raw_input, status) VALUES (?, ?, ?, 'pending')",
-            (run_id, input_type, raw_input[:10000]),  # truncate very long inputs
+            "INSERT INTO runs (run_id, run_type, input_type, raw_input, status) VALUES (?, ?, ?, ?, 'pending')",
+            (run_id, run_type, input_type, raw_input[:10000]),  # truncate very long inputs
         )
         conn.commit()
     finally:
@@ -61,13 +61,19 @@ def get_run(run_id: str) -> dict | None:
         conn.close()
 
 
-def list_runs(limit: int = 50, offset: int = 0) -> list[dict]:
+def list_runs(limit: int = 50, offset: int = 0, run_type: str | None = None) -> list[dict]:
     conn = get_connection()
     try:
-        rows = conn.execute(
-            "SELECT run_id, created_at, input_type, status, error FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
+        if run_type:
+            rows = conn.execute(
+                "SELECT run_id, created_at, run_type, input_type, status, error FROM runs WHERE run_type = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (run_type, limit, offset),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT run_id, created_at, run_type, input_type, status, error FROM runs ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
