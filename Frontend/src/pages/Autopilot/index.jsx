@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Button,
   Input,
@@ -38,7 +38,7 @@ const escapeHtml = (str = "") =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
 
 const formatPlainTextAsHtml = (text = "") => {
@@ -51,6 +51,11 @@ const formatPlainTextAsHtml = (text = "") => {
       return `<p>${lines.join("<br/>")}</p>`;
     })
     .join("");
+};
+
+const getSpeechRecognitionCtor = () => {
+  if (typeof window === "undefined") return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 };
 
 const Autopilot = () => {
@@ -67,8 +72,12 @@ const Autopilot = () => {
   const [rescheduleInputs, setRescheduleInputs] = useState({});
   const [rescheduleLoading, setRescheduleLoading] = useState({});
   const [rescheduleRecordingIndex, setRescheduleRecordingIndex] = useState(null);
-  const mediaRecorderRef = useRef(null);
   const rescheduleRecorderRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const speechRecognitionActiveRef = useRef(false);
+  const speechBaseTextRef = useRef("");
+  const speechFinalTextRef = useRef("");
+  const isRecordingRef = useRef(false);
 
   const handleRun = async (mode, audioB64 = null, overrideText = null) => {
     setIsProcessing(true);
@@ -132,42 +141,116 @@ const Autopilot = () => {
     }
   };
 
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  const stopLiveRecognition = () => {
+    speechRecognitionActiveRef.current = false;
+    const recognition = speechRecognitionRef.current;
+    speechRecognitionRef.current = null;
+    if (!recognition) return;
+
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try {
+      recognition.stop();
+    } catch {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopLiveRecognition();
+      if (rescheduleRecorderRef.current) {
+        try {
+          rescheduleRecorderRef.current.stop();
+        } catch {
+          // ignore
+        }
+        rescheduleRecorderRef.current = null;
+      }
+    };
+  }, []);
+
+  const composeInputFromSpeech = (baseText, finalText, interimText) => {
+    const base = (baseText || "").trim();
+    const finalPart = (finalText || "").trim();
+    const interimPart = (interimText || "").trim();
+    const spoken = `${finalPart}${finalPart && interimPart ? " " : ""}${interimPart}`.trim();
+    if (!base) return spoken;
+    if (!spoken) return base;
+    return `${base}\n${spoken}`.trim();
+  };
+
   const handleStartRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia) {
+    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+    if (!SpeechRecognitionCtor) {
       AntMessage.error(t("errors.browserNotSupported"));
       return;
     }
+
+    stopLiveRecognition();
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      const chunks = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
+      const recognition = new SpeechRecognitionCtor();
+      recognition.lang = lang === "zh" ? "zh-CN" : "en-US";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      speechBaseTextRef.current = inputText;
+      speechFinalTextRef.current = "";
+      speechRecognitionActiveRef.current = true;
+
+      recognition.onresult = (event) => {
+        let finalText = speechFinalTextRef.current;
+        let interimText = "";
+
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          const transcript = (event.results[i][0]?.transcript || "").trim();
+          if (!transcript) continue;
+          if (event.results[i].isFinal) {
+            finalText = `${finalText} ${transcript}`.trim();
+          } else {
+            interimText = `${interimText} ${transcript}`.trim();
+          }
+        }
+
+        speechFinalTextRef.current = finalText;
+        setInputText(composeInputFromSpeech(speechBaseTextRef.current, finalText, interimText));
       };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const b64 = reader.result.split(",")[1];
-          handleRun("audio", b64);
-        };
-        reader.readAsDataURL(blob);
+
+      recognition.onerror = () => {
+        // keep silent on transient speech errors
       };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
+
+      recognition.onend = () => {
+        if (!speechRecognitionActiveRef.current || !isRecordingRef.current) {
+          return;
+        }
+        try {
+          recognition.start();
+        } catch {
+          // ignore restart failure
+        }
+      };
+
+      recognition.start();
+      speechRecognitionRef.current = recognition;
       setIsRecording(true);
-    } catch {
+    } catch (err) {
+      console.error("Autopilot speech recognition error:", err);
+      stopLiveRecognition();
+      setIsRecording(false);
       AntMessage.error(t("errors.micDenied"));
     }
   };
 
   const handleStopRecording = () => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current = null;
-      setIsRecording(false);
-    }
+    stopLiveRecognition();
+    setIsRecording(false);
   };
 
   const appendToAnalyzeInput = (text) => {
@@ -177,7 +260,7 @@ const Autopilot = () => {
     return next;
   };
 
-  const buildRescheduleLine = (action, rawText) => {
+  const buildRescheduleLine = (action) => {
     const payload = action?.payload || {};
     const title = payload.title || (lang === "zh" ? "日程安排" : "Meeting");
     const date = payload.date || "";
@@ -204,7 +287,7 @@ const Autopilot = () => {
       const res = await api.postAPI("/autopilot/adjust-time", body);
       const data = res?.data || res || {};
       const rawText = (data.user_text || body.text || "").trim();
-      const normalizedLine = data.action ? buildRescheduleLine(data.action, rawText) : rawText;
+      const normalizedLine = data.action ? buildRescheduleLine(data.action) : rawText;
       if (normalizedLine) {
         const nextInput = appendToAnalyzeInput(normalizedLine);
         setRescheduleInputs((prev) => ({ ...prev, [index]: "" }));

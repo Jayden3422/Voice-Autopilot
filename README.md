@@ -76,6 +76,7 @@ User: "Schedule a demo next Tuesday at 2pm"
 ```
 
 Conflict handling supports minimal update input: `"Move it to 3pm"`.
+On Home, live transcription is shown while recording (browser SpeechRecognition); after stop, audio is uploaded to `/voice` for final recognition and execution.
 
 ### 2. Sales/Support Autopilot
 
@@ -90,6 +91,7 @@ Conversation text/audio
 ```
 
 Auto-enrichment example: calendar title can include `{company} - {product} - {budget}`.
+On Autopilot, `Start Recording` only performs live transcription into the input box; analysis is triggered manually by clicking Analyze.
 
 ---
 
@@ -119,7 +121,7 @@ Voice-Autopilot/
 │       ├── utils/               # Axios wrapper
 │       └── router/              # route config
 ├── Backend/
-│   ├── main.py                  # FastAPI entry (/voice, /calendar/text)
+│   ├── main.py                  # FastAPI entry (/voice, /voice/ws, /calendar/text, /tts)
 │   ├── api/autopilot.py         # orchestration + APIs
 │   ├── chat/                    # extraction, drafting, prompts
 │   ├── rag/                     # indexing + retrieval
@@ -272,6 +274,8 @@ SMTP_SSL=false
 SMTP_TIMEOUT=30
 ```
 
+Note: streaming STT/TTS tuning variables (for example `STREAM_STT_*`, `TTS_SEGMENT_*`) are available in `.env.example`.
+
 ---
 
 ## Run
@@ -299,6 +303,7 @@ Covers UI, logs, errors, AI extraction, and autopilot output in Chinese and Engl
 ### 2. Voice/Text Scheduling (AI-Driven)
 
 - Supports natural date/time expressions in both Chinese and English (for example: "tomorrow", "next Tuesday", "2pm to 3pm")
+- Home shows live transcript while recording, then runs backend recognition/scheduling after stop
 - Tool Calling extracts calendar slots with schema validation
 - Automatic conflict detection
 - Voice or text rescheduling on conflicts
@@ -310,6 +315,7 @@ Covers UI, logs, errors, AI extraction, and autopilot output in Chinese and Engl
 Page: `/autopilot`
 
 - Accepts text or audio, then extracts intent/urgency/budget/entities
+- Main recording button performs live transcription into the input box only (no auto-run)
 - Retrieves RAG evidence and drafts citation-backed replies
 - Auto-populates action payloads with human-edit controls
 - Includes `send_slack_summary` by default
@@ -346,6 +352,7 @@ Page: `/record`, with type filtering, detail view, and failed-action retry.
 | Endpoint | Method | Description |
 |------|------|------|
 | `/voice` | POST | Voice scheduling (supports `session_id` for conflict rescheduling) |
+| `/voice/ws` | WebSocket | Streaming voice channel (`stt_partial/stt_final` and chunked TTS events) |
 | `/calendar/text` | POST | Text scheduling (supports `session_id` for conflict rescheduling) |
 | `/autopilot/run` | POST | Analyze conversation and return action preview |
 | `/autopilot/confirm` | POST | Execute confirmed actions |
