@@ -1,11 +1,15 @@
+import asyncio
+import io
 import os
 import re
 import tempfile
+import threading
+import wave
+from pathlib import Path
 
-import edge_tts
-from edge_tts.exceptions import NoAudioReceived, UnexpectedResponse, WebSocketError
 from faster_whisper import WhisperModel
 from opencc import OpenCC
+from piper import PiperVoice
 
 cc = OpenCC("t2s")
 
@@ -74,25 +78,40 @@ def delta_from_previous(previous: str, current: str) -> str:
   return current[common_prefix_length(previous, current):]
 
 
-# TTS
-VOICE_NAME = "zh-CN-XiaoxiaoNeural"
-VOICE_BY_LANG = {
-  "zh": "zh-CN-XiaoxiaoNeural",
-  "en": "en-US-JennyNeural",
-}
-VOICE_FALLBACKS = {
-  "zh": ["zh-CN-XiaoxiaoNeural", "zh-CN-XiaoyiNeural", "zh-CN-YunxiNeural"],
-  "en": ["en-US-JennyNeural", "en-US-GuyNeural", "en-CA-ClaraNeural"],
-}
+# TTS - Piper (local, offline)
+_MODELS_DIR = Path(os.getenv(
+  "PIPER_MODELS_DIR",
+  str(Path(__file__).resolve().parent.parent / "models" / "piper"),
+))
 
-PROXY = os.getenv("HTTPS_PROXY") or os.getenv("HTTP_PROXY")
-CONNECT_TIMEOUT = int(os.getenv("EDGE_TTS_CONNECT_TIMEOUT", "10"))
-RECEIVE_TIMEOUT = int(os.getenv("EDGE_TTS_RECEIVE_TIMEOUT", "60"))
+PIPER_ZH_MODEL = os.getenv("PIPER_ZH_MODEL", str(_MODELS_DIR / "zh_CN-xiao_ya-medium.onnx"))
+PIPER_EN_MODEL = os.getenv("PIPER_EN_MODEL", str(_MODELS_DIR / "en_US-amy-medium.onnx"))
+
+_PIPER_MODEL_BY_LANG = {
+  "zh": PIPER_ZH_MODEL,
+  "en": PIPER_EN_MODEL,
+}
 
 TTS_SEGMENT_MAX_CHARS = int(os.getenv("TTS_SEGMENT_MAX_CHARS", "48"))
 TTS_FIRST_SEGMENT_CHARS = int(os.getenv("TTS_FIRST_SEGMENT_CHARS", "16"))
 TTS_MIN_PUNCT_BREAK_CHARS = int(os.getenv("TTS_MIN_PUNCT_BREAK_CHARS", "8"))
 _TTS_BREAK_PUNCT = set("?!?!?;;,,?.")
+
+_piper_voices: dict[str, PiperVoice] = {}
+_piper_lock = threading.Lock()
+
+
+def _get_piper_voice(lang: str) -> PiperVoice:
+  normalized = _normalize_lang(lang)
+  if normalized in _piper_voices:
+    return _piper_voices[normalized]
+  with _piper_lock:
+    if normalized in _piper_voices:
+      return _piper_voices[normalized]
+    model_path = _PIPER_MODEL_BY_LANG.get(normalized, PIPER_ZH_MODEL)
+    voice = PiperVoice.load(model_path, use_cuda=False)
+    _piper_voices[normalized] = voice
+    return voice
 
 
 def _normalize_tts_text(text: str) -> str:
@@ -135,34 +154,22 @@ def segment_tts_text(
   return [seg for seg in segments if seg]
 
 
-async def synthesize_speech(text: str, lang: str = "zh") -> bytes:
+def _synthesize_speech_sync(text: str, lang: str = "zh") -> bytes:
   normalized = _normalize_lang(lang)
-  primary_voice = VOICE_BY_LANG.get(normalized, VOICE_NAME)
-  voices = [primary_voice] + [v for v in VOICE_FALLBACKS.get(normalized, []) if v != primary_voice]
-  last_error = None
+  voice = _get_piper_voice(normalized)
+  chunks = list(voice.synthesize(text))
+  if not chunks:
+    raise RuntimeError("Piper produced no audio chunks")
+  first = chunks[0]
+  buf = io.BytesIO()
+  with wave.open(buf, "wb") as wav_file:
+    wav_file.setnchannels(first.sample_channels)
+    wav_file.setsampwidth(first.sample_width)
+    wav_file.setframerate(first.sample_rate)
+    for chunk in chunks:
+      wav_file.writeframes(chunk.audio_int16_bytes)
+  return buf.getvalue()
 
-  for voice in voices:
-    try:
-      communicate = edge_tts.Communicate(
-        text,
-        voice,
-        proxy=PROXY,
-        connect_timeout=CONNECT_TIMEOUT,
-        receive_timeout=RECEIVE_TIMEOUT,
-      )
-      audio_bytes = bytearray()
-      async for chunk in communicate.stream():
-        if chunk["type"] == "audio":
-          audio_bytes.extend(chunk["data"])
-      if audio_bytes:
-        return bytes(audio_bytes)
-      last_error = NoAudioReceived("No audio was received.")
-    except (NoAudioReceived, WebSocketError, UnexpectedResponse) as e:
-      last_error = e
-    except Exception as e:
-      last_error = e
 
-  if last_error:
-    raise last_error
-  raise NoAudioReceived("No audio was received.")
-
+async def synthesize_speech(text: str, lang: str = "zh") -> bytes:
+  return await asyncio.to_thread(_synthesize_speech_sync, text, lang)

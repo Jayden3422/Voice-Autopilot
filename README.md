@@ -132,32 +132,41 @@ On Autopilot, `Start Recording` only performs live transcription into the input 
 | Execution strategy | dry_run + parallel checks | Faster and safer |
 | Audit layer | Full lifecycle logging in `store/runs.py` | Observable and traceable |
 | Calendar automation | Playwright persistent context | No OAuth flow, MFA compatible |
+| Startup warmup pool | Background pre-init: Whisper JIT, Piper ONNX (representative-length sentences), OpenAI HTTPS pool, FAISS index | Eliminates first-request latency; ONNX execution plan is primed for real segment sizes |
 
-### Project Structure (Deduplicated)
+### Project Structure
 
 ```text
 Voice-Autopilot/
 ├── Frontend/
 │   └── src/
 │       ├── pages/               # Home / Autopilot / Record
-│       ├── i18n/                # zh/en
+│       ├── config/              # TTS and feature config
+│       ├── i18n/                # zh/en translations
 │       ├── utils/               # Axios wrapper
 │       └── router/              # route config
 ├── Backend/
 │   ├── main.py                  # FastAPI entry (/voice, /voice/ws, /calendar/text, /tts)
 │   ├── api/autopilot.py         # orchestration + APIs
 │   ├── chat/                    # extraction, drafting, prompts
+│   │   └── prompt/              # system prompt templates (.txt)
 │   ├── rag/                     # indexing + retrieval
+│   ├── rag_store/               # built FAISS index + embedding cache (runtime)
 │   ├── actions/dispatcher.py    # action routing (dry_run/execute)
 │   ├── connectors/              # Slack / Email / Linear
-│   ├── tools/                   # speech / calendar_agent / models
+│   ├── tools/                   # speech / calendar_agent / nlp / file_utils
+│   ├── utils/                   # shared utilities
+│   │   ├── timezone.py          # timezone helpers
+│   │   └── warmup/              # Startup warmup pool (Whisper / Piper / OpenAI / FAISS)
+│   ├── models/piper/            # Piper TTS voice models (zh_CN-xiao_ya / en_US-amy)
 │   ├── business/                # autopilot_schema / calendar_schema
 │   ├── store/                   # SQLite init + runs CRUD
-│   ├── tests/test_autopilot.py  # 12 tests
+│   ├── tests/                   # test_autopilot (12 tests) + test_tts
 │   ├── mcp/                     # MCP server and test client
 │   │   ├── mcp_server.py        # MCP Server (stdio transport)
 │   │   └── test_mcp_client.py   # MCP test client
-├── knowledge_base/              # RAG docs
+│   └── chrome_profile/          # Playwright persistent browser session
+├── knowledge_base/              # RAG docs (10 .md files)
 ├── .env.example
 └── README.md / README_zh.md
 ```
@@ -205,7 +214,7 @@ CREATE TABLE runs (
 | Uvicorn | ^0.34.0 | ASGI server |
 | OpenAI | ^1.59.7 | Tool Calling / Embeddings |
 | faster-whisper | ^1.1.0 | Speech recognition |
-| edge-tts | ^6.1.19 | Speech synthesis |
+| piper-tts | ^1.4.1 | Speech synthesis (local, offline) |
 | Playwright | ^1.50.1 | Google Calendar automation |
 | FAISS (CPU) | - | Vector retrieval |
 | MCP SDK | ^1.26.0 | Model Context Protocol server |
@@ -264,7 +273,23 @@ npm i
 `Python` 3.10.11
 
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper edge-tts opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio tzdata mcp[cli]
+pip install fastapi uvicorn[standard] python-multipart faster-whisper piper-tts g2pw sentence-stream unicode-rbnf opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio tzdata mcp[cli]
+```
+
+Install PyTorch (CPU-only, required for Chinese TTS phonemization):
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cpu
+```
+
+Download Piper TTS voice models (run once):
+
+```bash
+mkdir -p Backend/models/piper
+curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx" -o Backend/models/piper/zh_CN-xiao_ya-medium.onnx
+curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/zh/zh_CN/xiao_ya/medium/zh_CN-xiao_ya-medium.onnx.json" -o Backend/models/piper/zh_CN-xiao_ya-medium.onnx.json
+curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx" -o Backend/models/piper/en_US-amy-medium.onnx
+curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" -o Backend/models/piper/en_US-amy-medium.onnx.json
 ```
 
 Install browser runtime (required for Calendar automation):
@@ -304,7 +329,7 @@ SMTP_SSL=false
 SMTP_TIMEOUT=30
 ```
 
-Note: streaming STT/TTS tuning variables (for example `STREAM_STT_*`, `TTS_SEGMENT_*`) are available in `.env.example`.
+Note: Piper model paths (`PIPER_ZH_MODEL`, `PIPER_EN_MODEL`) and streaming STT/TTS tuning variables (for example `STREAM_STT_*`, `TTS_SEGMENT_*`) are available in `.env.example`.
 
 ---
 
@@ -320,6 +345,18 @@ npm run dev
 cd Backend
 python main.py
 ```
+
+On startup the warmup pool runs in the background and pre-initializes all heavy components:
+
+| Component | What is primed | Typical cost |
+|---|---|---|
+| `whisper_stt` | CTranslate2 JIT kernels (1 s silence inference) | ~2–5 s |
+| `piper_tts_zh` | ONNX execution plan + g2pW BERT model (~16-char sentence) | ~5–15 s |
+| `piper_tts_en` | ONNX execution plan (~16-char sentence) | ~1–3 s |
+| `openai_api` | httpx connection pool + both client singletons | ~0.5–1 s |
+| `rag_faiss` | FAISS index loaded into memory (skipped if not built) | ~1–3 s |
+
+The server accepts requests immediately; a full log summary is printed when all tasks finish.
 
 Build the knowledge base index (required for RAG search, only needed once; re-run after updating `knowledge_base/*.md`):
 
@@ -387,7 +424,7 @@ python Backend/mcp/test_mcp_client.py
 python Backend/mcp/test_mcp_client.py search_knowledge_base
 ```
 
-Note: first startup may take ~60s while FAISS loads. Subsequent tool calls are instant.
+Note: the HTTP server starts immediately; the startup warmup pool pre-initializes FAISS and other components in the background (~60s on first run). Subsequent tool calls are instant.
 
 ---
 
@@ -502,6 +539,8 @@ Future expansion suggestions: E2E tests, performance benchmarks, concurrent load
 - Playwright is sensitive to network quality
 - Whisper `small` can be slow on CPU (consider `tiny` for speed)
 - Current implementation supports same-day events only
+- Piper TTS cold-start: ONNX Runtime caches execution plans per input shape; the warmup pool synthesizes representative-length sentences (matching `TTS_FIRST_SEGMENT_CHARS`) so the cached plan aligns with real requests — first real call is fast after warmup completes
+- Piper Chinese TTS requires `torch` (CPU-only, ~300 MB); English TTS has no PyTorch dependency
 
 ---
 
@@ -544,6 +583,7 @@ Compared with OAuth-heavy Calendar API integration, this approach is faster to o
 - Calendar automation: `Backend/tools/calendar_agent.py`
 - RAG: `Backend/rag/ingest.py`, `Backend/rag/retrieve.py`
 - Audit logs: `Backend/store/db.py`, `Backend/store/runs.py`
+- Startup warmup pool: `Backend/utils/warmup/`
 - MCP Server: `Backend/mcp/mcp_server.py`
 - MCP test client: `Backend/mcp/test_mcp_client.py`
 - Tests: `Backend/tests/test_autopilot.py`
