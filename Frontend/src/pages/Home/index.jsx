@@ -167,7 +167,7 @@ const Home = () => {
     setIsPlaying(false);
   };
 
-  const playBase64Now = (base64, mimeType = "audio/mpeg") => {
+  const playBase64Now = (base64, mimeType = "audio/wav") => {
     return new Promise((resolve) => {
       try {
         const byteString = atob(base64);
@@ -218,7 +218,7 @@ const Home = () => {
       });
   };
 
-  const enqueueAudioChunk = (base64, mimeType = "audio/mpeg") => {
+  const enqueueAudioChunk = (base64, mimeType = "audio/wav") => {
     if (!base64) return;
     playbackQueueRef.current.push({ base64, mimeType });
     pumpAudioQueue();

@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import uvicorn
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -29,8 +30,16 @@ from chat.calendar_extractor import extract_calendar_event
 from tools.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
 from store.runs import create_run, update_run
+from utils.warmup import run_all as _warmup_run_all
 
-app = FastAPI(title="Voice Schedule Assistant")
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+  asyncio.create_task(_warmup_run_all())
+  yield
+
+
+app = FastAPI(title="Voice Schedule Assistant", lifespan=_lifespan)
 app.include_router(autopilot_router)
 logger = logging.getLogger(__name__)
 
