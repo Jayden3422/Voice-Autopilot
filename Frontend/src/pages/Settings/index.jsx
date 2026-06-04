@@ -77,10 +77,8 @@ export default function Settings() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshGcStatus = useCallback(async () => {
-    try {
-      const st = await fetchGcStatus();
-      setGcStatus(st);
-    } catch (_) {}
+    const st = await fetchGcStatus();
+    setGcStatus(st);
   }, []);
 
   // Initial load
@@ -187,7 +185,8 @@ export default function Settings() {
       const url = await fetchAuthUrl();
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      message.error(e.message || "Failed to get auth URL");
+      const detail = e?.response?.data?.error;
+      message.error(detail || e.message || "Failed to get auth URL");
     } finally {
       setGcConnecting(false);
     }
