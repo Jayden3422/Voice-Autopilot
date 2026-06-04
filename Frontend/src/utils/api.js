@@ -1,17 +1,17 @@
 import request from './request.js'
 
-export function getAPI(url, params) {
-  return request({ method: 'get', url, params })
+export function getAPI(url, params, config = {}) {
+  return request({ method: 'get', url, params, ...config })
 }
 
-export function postAPI(url, data) {
-  return request({ method: 'post', url, data })
+export function postAPI(url, data, config = {}) {
+  return request({ method: 'post', url, data, ...config })
 }
 
-export function putAPI(url, data) {
-  return request({ method: 'put', url, data })
+export function putAPI(url, data, config = {}) {
+  return request({ method: 'put', url, data, ...config })
 }
 
-export function deleteListAPI(url, params) {
-  return request({ method: 'delete', url, params })
+export function deleteListAPI(url, params, config = {}) {
+  return request({ method: 'delete', url, params, ...config })
 }

@@ -34,7 +34,7 @@ async function saveSettings(body) {
 
 async function fetchGcStatus() {
   try {
-    const res = await getAPI("/settings/google-calendar/status");
+    const res = await getAPI("/settings/google-calendar/status", undefined, { _suppressToast: true });
     return res.data;
   } catch {
     return { has_credentials: false, is_connected: false };
@@ -167,7 +167,7 @@ export default function Settings() {
       await refreshGcStatus();
     } catch (e) {
       if (e?.errorFields) return; // form validation error — already shown
-      message.error(s("saveError"));
+      // interceptor already showed the HTTP error toast
     } finally {
       setSaving(false);
     }
@@ -186,7 +186,7 @@ export default function Settings() {
       window.open(url, "_blank", "noopener,noreferrer");
     } catch (e) {
       const detail = e?.response?.data?.error;
-      message.error(detail || e.message || "Failed to get auth URL");
+      if (detail) message.error(detail); // show backend-specific error on top of interceptor's generic one
     } finally {
       setGcConnecting(false);
     }
@@ -199,7 +199,7 @@ export default function Settings() {
       message.success(s("googleNotConnected"));
       await refreshGcStatus();
     } catch (e) {
-      message.error("Disconnect failed");
+      // interceptor already showed the HTTP error toast
     } finally {
       setGcDisconnecting(false);
     }

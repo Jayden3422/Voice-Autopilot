@@ -36,7 +36,7 @@ instance.interceptors.response.use(
       error.message = http.networkFail;
     }
 
-    AntMessage.error(error.message);
+    if (!error.config?._suppressToast) AntMessage.error(error.message);
     return Promise.reject(error);
   },
 );

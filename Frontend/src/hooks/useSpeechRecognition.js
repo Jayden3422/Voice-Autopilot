@@ -60,8 +60,12 @@ export function useSpeechRecognition({ lang, onResult, onError }) {
     };
 
     r.onerror = (event) => {
-      if (event.error === "not-allowed" && onErrorRef.current) {
-        onErrorRef.current(event);
+      const transient = event.error === "no-speech" || event.error === "aborted";
+      if (!transient) {
+        stop();
+        if (event.error === "not-allowed" && onErrorRef.current) {
+          onErrorRef.current(event);
+        }
       }
     };
 
