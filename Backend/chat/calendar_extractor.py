@@ -16,16 +16,6 @@ logger = logging.getLogger(__name__)
 BUSINESS_DIR = Path(__file__).resolve().parent.parent / "business"
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 
-_client: AsyncOpenAI | None = None
-
-
-def get_openai_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    return _client
-
-
 @lru_cache(maxsize=4)
 def _load_schema(name: str = "calendar_schema.json") -> dict:
     with open(BUSINESS_DIR / name, "r", encoding="utf-8") as f:
@@ -73,6 +63,7 @@ async def _call_with_tools(client: AsyncOpenAI, model: str, messages: list, tool
 async def extract_calendar_event(
     user_text: str,
     *,
+    client: AsyncOpenAI,
     lang: str = "zh",
     model: str | None = None,
     context_event: dict | None = None,
@@ -82,7 +73,6 @@ async def extract_calendar_event(
     Returns dict with keys: date (str YYYY-MM-DD), start_time (str HH:MM),
     end_time (str HH:MM), title (str), attendees (list[str]).
     """
-    client = get_openai_client()
     model = model or os.getenv("OPENAI_CALENDAR_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     schema = _load_schema()
     template = _load_prompt_template()

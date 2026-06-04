@@ -6,6 +6,8 @@ import os
 
 import httpx
 
+import store.settings_store as ss
+
 logger = logging.getLogger(__name__)
 
 WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
@@ -25,11 +27,7 @@ async def dry_run(payload: dict) -> dict:
 
 async def execute(payload: dict) -> dict:
     """Send a message to Slack via webhook."""
-    try:
-        import store.settings_store as ss
-        url = ss.get_connector("slack").get("webhook_url", "") or WEBHOOK_URL
-    except Exception:
-        url = WEBHOOK_URL
+    url = ss.get_connector("slack").get("webhook_url", "") or WEBHOOK_URL
     if not url:
         return {"status": "failed", "error": "SLACK_WEBHOOK_URL not configured"}
 

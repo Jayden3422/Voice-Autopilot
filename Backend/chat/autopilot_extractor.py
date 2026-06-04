@@ -16,16 +16,6 @@ logger = logging.getLogger(__name__)
 BUSINESS_DIR = Path(__file__).resolve().parent.parent / "business"
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 
-_client: AsyncOpenAI | None = None
-
-
-def get_openai_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        _client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    return _client
-
-
 @lru_cache(maxsize=4)
 def _load_schema(schema_name: str = "autopilot_schema.json") -> dict:
     path = BUSINESS_DIR / schema_name
@@ -59,6 +49,7 @@ def _build_tools(schema: dict) -> list[dict]:
 async def extract_autopilot_json(
     transcript: str,
     *,
+    client: AsyncOpenAI,
     model: str | None = None,
     schema_name: str = "autopilot_schema.json",
     prompt_name: str = "autopilot_extraction.txt",
@@ -68,7 +59,6 @@ async def extract_autopilot_json(
     Call OpenAI with tool_choice=required to extract structured data.
     Returns validated JSON dict. Raises on persistent validation failure.
     """
-    client = get_openai_client()
     model = model or os.getenv("OPENAI_AUTOPILOT_EXTRACT_MODEL") or os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
     schema = _load_schema(schema_name)
     prompt_template = _load_prompt(prompt_name)

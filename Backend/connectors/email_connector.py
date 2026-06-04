@@ -7,6 +7,8 @@ import socket
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import store.settings_store as ss
+
 logger = logging.getLogger(__name__)
 
 
@@ -24,24 +26,14 @@ async def dry_run(payload: dict) -> dict:
 
 async def execute(payload: dict) -> dict:
     """Send an email via SMTP."""
-    try:
-        import store.settings_store as ss
-        cfg = ss.get_connector("email")
-        host = cfg.get("smtp_host", "") or os.getenv("SMTP_HOST", "")
-        port = int(cfg.get("smtp_port") or os.getenv("SMTP_PORT", "587"))
-        user = cfg.get("smtp_user", "") or os.getenv("SMTP_USER", "")
-        password = cfg.get("smtp_pass", "") or os.getenv("SMTP_PASS", "")
-        from_addr = cfg.get("smtp_from", "") or os.getenv("SMTP_FROM", user)
-        timeout = float(cfg.get("smtp_timeout") or os.getenv("SMTP_TIMEOUT", "20"))
-        use_ssl = bool(cfg.get("smtp_ssl")) or os.getenv("SMTP_SSL", "").lower() in ("1", "true", "yes") or port == 465
-    except Exception:
-        host = os.getenv("SMTP_HOST", "")
-        port = int(os.getenv("SMTP_PORT", "587"))
-        user = os.getenv("SMTP_USER", "")
-        password = os.getenv("SMTP_PASS", "")
-        from_addr = os.getenv("SMTP_FROM", user)
-        timeout = float(os.getenv("SMTP_TIMEOUT", "20"))
-        use_ssl = os.getenv("SMTP_SSL", "").lower() in ("1", "true", "yes") or port == 465
+    cfg = ss.get_connector("email")
+    host = cfg.get("smtp_host", "") or os.getenv("SMTP_HOST", "")
+    port = int(cfg.get("smtp_port") or os.getenv("SMTP_PORT", "587"))
+    user = cfg.get("smtp_user", "") or os.getenv("SMTP_USER", "")
+    password = cfg.get("smtp_pass", "") or os.getenv("SMTP_PASS", "")
+    from_addr = cfg.get("smtp_from", "") or os.getenv("SMTP_FROM", user)
+    timeout = float(cfg.get("smtp_timeout") or os.getenv("SMTP_TIMEOUT", "20"))
+    use_ssl = bool(cfg.get("smtp_ssl")) or os.getenv("SMTP_SSL", "").lower() in ("1", "true", "yes") or port == 465
 
     if not host or not user:
         return {"status": "failed", "error": "SMTP not configured (SMTP_HOST, SMTP_USER required)"}
@@ -55,12 +47,8 @@ async def execute(payload: dict) -> dict:
         return {"status": "failed", "error": "Recipient email (to) is required"}
 
     msg = MIMEMultipart("alternative")
-    try:
-        import store.settings_store as ss
-        _cfg = ss.get_connector("email")
-        _default_from_name = _cfg.get("smtp_from_name", "") or os.getenv("SMTP_FROM_NAME", "")
-    except Exception:
-        _default_from_name = os.getenv("SMTP_FROM_NAME", "")
+    _cfg = ss.get_connector("email")
+    _default_from_name = _cfg.get("smtp_from_name", "") or os.getenv("SMTP_FROM_NAME", "")
     from_name = payload.get("from_name") or _default_from_name
     if from_name:
         msg["From"] = f"{from_name} <{from_addr}>"

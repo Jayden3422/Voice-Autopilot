@@ -8,12 +8,14 @@ import os
 import uuid
 import re
 import html
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
-from chat.autopilot_extractor import extract_autopilot_json, get_openai_client
+from ai_client import get_openai_client
+from chat.autopilot_extractor import extract_autopilot_json
 from chat.calendar_extractor import extract_calendar_event
 from chat.reply_drafter import generate_reply_draft
 from rag.retrieve import retrieve
@@ -50,7 +52,10 @@ class AutopilotAdjustRequest(BaseModel):
 # --- POST /autopilot/run ---
 
 @router.post("/run")
-async def autopilot_run(req: AutopilotRunRequest):
+async def autopilot_run(
+    req: AutopilotRunRequest,
+    client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+):
     run_id = str(uuid.uuid4())
 
     # Determine input
@@ -81,11 +86,10 @@ async def autopilot_run(req: AutopilotRunRequest):
         update_run(run_id, transcript=transcript, status="transcribed")
 
         # Step 2: Extraction via Tool Calling
-        extracted = await extract_autopilot_json(transcript, run_id=run_id)
+        extracted = await extract_autopilot_json(transcript, client=client, run_id=run_id)
         update_run(run_id, extracted_json=extracted, status="extracted")
 
         # Step 3: RAG retrieval
-        client = get_openai_client()
         query = _build_rag_query(extracted)
         evidence = await retrieve(query, client)
         update_run(run_id, evidence_json=evidence)
@@ -278,7 +282,10 @@ async def autopilot_confirm(req: AutopilotConfirmRequest):
 # --- POST /autopilot/adjust-time ---
 
 @router.post("/adjust-time")
-async def autopilot_adjust_time(req: AutopilotAdjustRequest):
+async def autopilot_adjust_time(
+    req: AutopilotAdjustRequest,
+    client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+):
     action = req.action or {}
     if action.get("action_type") != "create_meeting":
         raise HTTPException(status_code=400, detail="Only create_meeting can be adjusted")
@@ -309,6 +316,7 @@ async def autopilot_adjust_time(req: AutopilotAdjustRequest):
 
     extracted = await extract_calendar_event(
         user_text,
+        client=client,
         lang=locale,
         context_event=context_event,
     )
@@ -335,10 +343,11 @@ async def autopilot_adjust_time(req: AutopilotAdjustRequest):
 # --- POST /autopilot/ingest ---
 
 @router.post("/ingest")
-async def autopilot_ingest():
+async def autopilot_ingest(
+    client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+):
     """Re-ingest the knowledge base into the FAISS index."""
     from rag.ingest import ingest_knowledge_base
-    client = get_openai_client()
     result = await ingest_knowledge_base(client)
     return {"status": "ok", **result}
 

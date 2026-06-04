@@ -18,7 +18,8 @@ load_dotenv(BACKEND_DIR.parent / ".env")
 # faiss takes ~45s to load on first import; do it here before the event loop starts
 import faiss  # noqa: F401  (pre-warm so rag.retrieve doesn't block the event loop)
 from actions.dispatcher import execute_action
-from chat.autopilot_extractor import extract_autopilot_json, get_openai_client
+from ai_client import get_openai_client
+from chat.autopilot_extractor import extract_autopilot_json
 from chat.reply_drafter import generate_reply_draft
 from connectors import email_connector, linear, slack
 from rag.retrieve import retrieve
@@ -53,7 +54,8 @@ async def analyze_transcript(transcript: str, model: str | None = None) -> str:
         transcript: The meeting/conversation transcript text to analyze
         model: Optional OpenAI model override (defaults to env OPENAI_MODEL)
     """
-    result = await extract_autopilot_json(transcript, model=model)
+    client = get_openai_client()
+    result = await extract_autopilot_json(transcript, client=client, model=model)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
 

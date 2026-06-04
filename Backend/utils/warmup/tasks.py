@@ -86,7 +86,7 @@ async def warmup_piper_en() -> None:
 
 async def warmup_openai() -> None:
     """
-    Pre-initialize both shared AsyncOpenAI singletons and establish the
+    Pre-initialize the centralized AsyncOpenAI client and establish the
     underlying HTTPS connection pool to api.openai.com.
 
     Why this matters
@@ -98,10 +98,6 @@ async def warmup_openai() -> None:
       - HTTP/2 session setup
     Making a lightweight `models.list()` call here amortises that cost so that
     the first user-facing extraction / calendar / reply-draft call is instant.
-
-    Both singletons (autopilot_extractor and calendar_extractor) share the same
-    api.openai.com base URL, so warming up one pre-populates the OS-level
-    connection; we still initialise both objects to avoid any lazy-import cost.
     """
     import os
 
@@ -109,15 +105,10 @@ async def warmup_openai() -> None:
     if not api_key or api_key.startswith("sk-your"):
         raise _SkipWarmup("OPENAI_API_KEY not configured")
 
-    # Initialise both lazy singletons so subsequent callers get a ready client
-    from chat.autopilot_extractor import get_openai_client as _get_autopilot_client
-    from chat.calendar_extractor import get_openai_client as _get_calendar_client
-
-    autopilot_client = _get_autopilot_client()
-    _get_calendar_client()  # initialise the calendar singleton in-place
-
+    from ai_client import get_openai_client
+    client = get_openai_client()
     # models.list() is the lightest authenticated call: no token cost, fast
-    await autopilot_client.models.list()
+    await client.models.list()
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,8 @@ import os
 
 import httpx
 
+import store.settings_store as ss
+
 logger = logging.getLogger(__name__)
 
 API_URL = "https://api.linear.app/graphql"
@@ -14,11 +16,7 @@ PRIORITY_MAP = {"low": 4, "medium": 3, "high": 2, "urgent": 1}
 
 
 def _get_headers() -> dict:
-    try:
-        import store.settings_store as ss
-        api_key = ss.get_connector("linear").get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
-    except Exception:
-        api_key = os.getenv("LINEAR_API_KEY", "")
+    api_key = ss.get_connector("linear").get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
     return {
         "Authorization": api_key,
         "Content-Type": "application/json",
@@ -39,14 +37,9 @@ async def dry_run(payload: dict) -> dict:
 
 async def execute(payload: dict) -> dict:
     """Create an issue in Linear."""
-    try:
-        import store.settings_store as ss
-        lin_cfg = ss.get_connector("linear")
-        api_key = lin_cfg.get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
-        default_team_id = lin_cfg.get("team_id", "") or os.getenv("LINEAR_TEAM_ID", "")
-    except Exception:
-        api_key = os.getenv("LINEAR_API_KEY", "")
-        default_team_id = os.getenv("LINEAR_TEAM_ID", "")
+    lin_cfg = ss.get_connector("linear")
+    api_key = lin_cfg.get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
+    default_team_id = lin_cfg.get("team_id", "") or os.getenv("LINEAR_TEAM_ID", "")
     if not api_key:
         return {"status": "failed", "error": "LINEAR_API_KEY not configured"}
 

@@ -13,9 +13,14 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 import uvicorn
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form, WebSocket, WebSocketDisconnect
+from typing import Annotated
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form, WebSocket, WebSocketDisconnect, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from openai import AsyncOpenAI
 from pydantic import BaseModel
+
+from ai_client import get_openai_client
 
 from tools.models import VoiceResponse, CalendarCommand
 from tools.file_utils import save_temp_file
@@ -172,6 +177,7 @@ async def _process_calendar_text(
   normalized_lang: str,
   session_id: str | None,
   include_audio: bool,
+  client: AsyncOpenAI,
   input_type: str = "text",
 ) -> VoiceResponse:
   msgs = MESSAGES[normalized_lang]
@@ -210,6 +216,7 @@ async def _process_calendar_text(
   try:
     extracted = await extract_calendar_event(
       user_text,
+      client=client,
       lang=normalized_lang,
       context_event=context_event,
     )
@@ -444,6 +451,7 @@ async def _finalize_stream(
   websocket: WebSocket,
   state: dict,
   final_reason: str,
+  client: AsyncOpenAI,
 ) -> None:
   task = state.get("stt_task")
   if task and not task.done():
@@ -481,6 +489,7 @@ async def _finalize_stream(
     state["lang"],
     state["session_id"],
     include_audio=False,
+    client=client,
     input_type="audio",
   )
 
@@ -533,6 +542,7 @@ async def tts(request: TTSRequest):
 
 @app.post("/voice", response_model=VoiceResponse)
 async def handle_voice(
+  client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
   audio: UploadFile | None = File(None),
   text: str | None = Form(None),
   lang: str = Form("zh"),
@@ -545,13 +555,13 @@ async def handle_voice(
     raise HTTPException(status_code=400, detail=msgs["no_audio"])
 
   if text and text.strip():
-    return await _process_calendar_text(text.strip(), normalized_lang, session_id, bool(include_audio), input_type="text")
+    return await _process_calendar_text(text.strip(), normalized_lang, session_id, bool(include_audio), client=client, input_type="text")
 
   temp_path = save_temp_file(audio)
 
   try:
     user_text = transcribe_audio(temp_path, lang=normalized_lang)
-    return await _process_calendar_text(user_text, normalized_lang, session_id, bool(include_audio), input_type="audio")
+    return await _process_calendar_text(user_text, normalized_lang, session_id, bool(include_audio), client=client, input_type="audio")
 
   except HTTPException:
     raise
@@ -566,7 +576,10 @@ async def handle_voice(
 
 
 @app.websocket("/voice/ws")
-async def handle_voice_ws(websocket: WebSocket):
+async def handle_voice_ws(
+  websocket: WebSocket,
+  client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+):
   await websocket.accept()
   state = _new_stream_state(lang="zh", session_id=None, include_audio=True)
 
@@ -616,17 +629,17 @@ async def handle_voice_ws(websocket: WebSocket):
         await _emit_partial_if_ready(websocket, state)
 
         if state["total_audio_ms"] >= STREAM_STT_MAX_AUDIO_MS:
-          await _finalize_stream(websocket, state, final_reason="max_duration")
+          await _finalize_stream(websocket, state, final_reason="max_duration", client=client)
           return
 
         if _should_finalize_by_silence(state, now_ms):
-          await _finalize_stream(websocket, state, final_reason="silence_timeout")
+          await _finalize_stream(websocket, state, final_reason="silence_timeout", client=client)
           return
 
         continue
 
       if packet_type == "stop":
-        await _finalize_stream(websocket, state, final_reason="user_stop")
+        await _finalize_stream(websocket, state, final_reason="user_stop", client=client)
         return
 
       if packet_type == "ping":
@@ -653,13 +666,17 @@ async def handle_voice_ws(websocket: WebSocket):
 
 
 @app.post("/calendar/text", response_model=VoiceResponse)
-async def handle_calendar_text(request: CalendarTextRequest):
+async def handle_calendar_text(
+  request: CalendarTextRequest,
+  client: Annotated[AsyncOpenAI, Depends(get_openai_client)],
+):
   normalized_lang = _normalize_lang(request.lang or "zh")
   return await _process_calendar_text(
     request.text or "",
     normalized_lang,
     request.session_id,
     bool(request.include_audio),
+    client=client,
     input_type="text",
   )
 

@@ -2,11 +2,13 @@
 
 import copy
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse, RedirectResponse
 
 import store.settings_store as ss
+from settings_deps import get_settings_store
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
@@ -42,8 +44,10 @@ def _merge_preserving_masked(current: dict, new: dict) -> None:
 
 
 @router.get("")
-async def get_settings():
-    return _mask(ss.load())
+async def get_settings(
+    settings: Annotated[dict, Depends(get_settings_store)],
+):
+    return _mask(settings)
 
 
 @router.put("")
