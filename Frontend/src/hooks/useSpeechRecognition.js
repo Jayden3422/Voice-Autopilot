@@ -11,6 +11,8 @@ export function useSpeechRecognition({ lang, onResult }) {
   const recognitionRef = useRef(null);
   const activeRef = useRef(false);
   const finalTextRef = useRef("");
+  const onResultRef = useRef(onResult);
+  onResultRef.current = onResult;
 
   const stop = () => {
     activeRef.current = false;
@@ -52,12 +54,14 @@ export function useSpeechRecognition({ lang, onResult }) {
         }
       }
       finalTextRef.current = finalText;
-      onResult({ finalText, interimText });
+      onResultRef.current({ finalText, interimText });
     };
 
     r.onerror = () => {};
 
     r.onend = () => {
+      // activeRef check is sufficient: stop() nulls r.onend synchronously before calling r.stop(),
+      // so by the time onend fires after an intentional stop, this handler is already null.
       if (!activeRef.current) return;
       try { r.start(); } catch { /* ignore restart failure */ }
     };

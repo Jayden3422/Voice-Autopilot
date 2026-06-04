@@ -123,5 +123,6 @@ export function useAudioPlayback({ lang }) {
     if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   };
 
+  // Callers MUST call cleanup() in a useEffect teardown to stop audio and release resources.
   return { isPlaying, isGreeting, enqueueChunk, stopPlayback, playGreeting, cleanup };
 }

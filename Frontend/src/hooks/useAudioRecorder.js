@@ -23,6 +23,8 @@ export function useAudioRecorder({ onBlob }) {
     recorderRef.current = null;
   };
 
+  // Callers MUST call cleanup() in a useEffect teardown to stop the mic stream.
+  // @throws {DOMException} if microphone access is denied — callers must catch.
   const startRecording = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     streamRef.current = stream;
