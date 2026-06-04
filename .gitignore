@@ -33,3 +33,5 @@ g2pW
 
 # Private
 .env
+.claude/
+.venv/

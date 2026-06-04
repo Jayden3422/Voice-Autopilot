@@ -10,7 +10,7 @@
 [![Tests](https://img.shields.io/badge/tests-12%20passing-success)](Backend/tests/test_autopilot.py)
 [![Python](https://img.shields.io/badge/python-3.10.11-blue)](https://www.python.org/)
 [![React](https://img.shields.io/badge/react-19-61dafb)](https://react.dev/)
-[![FastAPI](https://img.shields.io/badge/fastapi-0.122.0-009688)](https://fastapi.tiangolo.com/)
+[![FastAPI](https://img.shields.io/badge/fastapi-0.136.3-009688)](https://fastapi.tiangolo.com/)
 
 </div>
 
@@ -30,7 +30,7 @@
 - [API Quick Reference](#api-quick-reference)
 - [Testing and Quality Assurance](#testing-and-quality-assurance)
 - [Known Issues and Limitations](#known-issues-and-limitations)
-- [Playwright Calendar Automation Deep Dive](#playwright-calendar-automation-deep-dive)
+- [Calendar Integration Deep Dive](#calendar-integration-deep-dive)
 - [Code Entry Points](#code-entry-points)
 - [Links](#links)
 
@@ -131,7 +131,8 @@ On Autopilot, `Start Recording` only performs live transcription into the input 
 | Routing layer | Unified routing in `actions/dispatcher.py` | Easy connector extension |
 | Execution strategy | dry_run + parallel checks | Faster and safer |
 | Audit layer | Full lifecycle logging in `store/runs.py` | Observable and traceable |
-| Calendar automation | Playwright persistent context | No OAuth flow, MFA compatible |
+| Calendar automation | Playwright (browser) **or** Google Calendar API v3 — switchable in Settings UI | No OAuth setup needed for Playwright; API mode supports programmatic integration |
+| Settings UI | In-app page for connector on/off and credentials | No need to edit `.env` for connector changes; tokens stored in `settings.json` |
 | Startup warmup pool | Background pre-init: Whisper JIT, Piper ONNX (representative-length sentences), OpenAI HTTPS pool, FAISS index | Eliminates first-request latency; ONNX execution plan is primed for real segment sizes |
 
 ### Project Structure
@@ -140,7 +141,7 @@ On Autopilot, `Start Recording` only performs live transcription into the input 
 Voice-Autopilot/
 ├── Frontend/
 │   └── src/
-│       ├── pages/               # Home / Autopilot / Record
+│       ├── pages/               # Home / Autopilot / Record / Settings
 │       ├── config/              # TTS and feature config
 │       ├── i18n/                # zh/en translations
 │       ├── utils/               # Axios wrapper
@@ -148,46 +149,30 @@ Voice-Autopilot/
 ├── Backend/
 │   ├── main.py                  # FastAPI entry (/voice, /voice/ws, /calendar/text, /tts)
 │   ├── api/autopilot.py         # orchestration + APIs
+│   ├── api/settings.py          # Settings CRUD + Google OAuth2 flow
 │   ├── chat/                    # extraction, drafting, prompts
 │   │   └── prompt/              # system prompt templates (.txt)
 │   ├── rag/                     # indexing + retrieval
 │   ├── rag_store/               # built FAISS index + embedding cache (runtime)
-│   ├── actions/dispatcher.py    # action routing (dry_run/execute)
-│   ├── connectors/              # Slack / Email / Linear
+│   ├── actions/dispatcher.py    # action routing (dry_run/execute); respects settings
+│   ├── connectors/              # Slack / Email / Linear / Google Calendar API
 │   ├── tools/                   # speech / calendar_agent / nlp / file_utils
 │   ├── utils/                   # shared utilities
 │   │   ├── timezone.py          # timezone helpers
 │   │   └── warmup/              # Startup warmup pool (Whisper / Piper / OpenAI / FAISS)
 │   ├── models/piper/            # Piper TTS voice models (zh_CN-xiao_ya / en_US-amy)
 │   ├── business/                # autopilot_schema / calendar_schema
-│   ├── store/                   # SQLite init + runs CRUD
+│   ├── store/                   # SQLite init + runs CRUD + settings_store
+│   ├── settings.json            # Runtime settings (auto-created; connector keys + calendar mode)
 │   ├── tests/                   # test_autopilot (12 tests) + test_tts
 │   ├── mcp/                     # MCP server and test client
 │   │   ├── mcp_server.py        # MCP Server (stdio transport)
 │   │   └── test_mcp_client.py   # MCP test client
 │   └── chrome_profile/          # Playwright persistent browser session
 ├── knowledge_base/              # RAG docs (10 .md files)
+├── requirements.txt
 ├── .env.example
 └── README.md / README_zh.md
-```
-
-### Audit Table (Core Fields)
-
-```sql
-CREATE TABLE runs (
-  run_id TEXT PRIMARY KEY,
-  run_type TEXT NOT NULL DEFAULT 'autopilot',
-  input_type TEXT,
-  transcript TEXT,
-  extracted_json TEXT,
-  evidence_json TEXT,
-  reply_draft TEXT,
-  actions_json TEXT,
-  status TEXT NOT NULL DEFAULT 'pending',
-  error TEXT,
-  created_at TEXT,
-  updated_at TEXT
-);
 ```
 
 ---
@@ -210,12 +195,14 @@ CREATE TABLE runs (
 
 | Tech | Version | Purpose |
 |------|------|------|
-| FastAPI | ^0.122.0 | Web API |
-| Uvicorn | ^0.34.0 | ASGI server |
+| FastAPI | ^0.136.3 | Web API |
+| Uvicorn | ^0.49.0 | ASGI server |
 | OpenAI | ^1.59.7 | Tool Calling / Embeddings |
 | faster-whisper | ^1.1.0 | Speech recognition |
 | piper-tts | ^1.4.1 | Speech synthesis (local, offline) |
-| Playwright | ^1.50.1 | Google Calendar automation |
+| Playwright | ^1.50.1 | Google Calendar automation (browser mode) |
+| google-api-python-client | ^2.x | Google Calendar API v3 (API mode) |
+| google-auth-oauthlib | ^1.x | OAuth2 flow for Google Calendar API |
 | FAISS (CPU) | - | Vector retrieval |
 | MCP SDK | ^1.26.0 | Model Context Protocol server |
 | jsonschema | ^4.23.0 | Output validation |
@@ -272,8 +259,22 @@ npm i
 
 `Python` 3.10.11
 
+Create and activate a virtual environment:
+
 ```bash
-pip install fastapi uvicorn[standard] python-multipart faster-whisper piper-tts g2pw sentence-stream unicode-rbnf opencc-python-reimplemented dateparser playwright python-dotenv openai jsonschema faiss-cpu numpy httpx pytest pytest-asyncio tzdata mcp[cli]
+# Windows
+python -m venv .venv
+.\.venv\Scripts\activate
+
+# macOS / Linux
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install all dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
 
 Install PyTorch (CPU-only, required for Chinese TTS phonemization):
@@ -292,7 +293,7 @@ curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/m
 curl -L "https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json" -o Backend/models/piper/en_US-amy-medium.onnx.json
 ```
 
-Install browser runtime (required for Calendar automation):
+Install browser runtime (required for Calendar automation in Playwright mode):
 
 ```bash
 python -m playwright install chromium
@@ -308,12 +309,12 @@ Required:
 
 ```env
 OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-5-mini
+OPENAI_MODEL=gpt-4.1-mini
 OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 TIMEZONE=America/Toronto
 ```
 
-Optional (to enable connectors):
+Optional (to enable connectors via `.env`):
 
 ```env
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
@@ -328,6 +329,8 @@ SMTP_FROM_NAME=Voice Autopilot
 SMTP_SSL=false
 SMTP_TIMEOUT=30
 ```
+
+> **Tip:** Connector credentials and the calendar mode can also be configured at runtime through the in-app **Settings** page (`/settings`) without editing `.env`. Values saved in the UI are stored in `Backend/settings.json` and take precedence over environment variables.
 
 Note: Piper model paths (`PIPER_ZH_MODEL`, `PIPER_EN_MODEL`) and streaming STT/TTS tuning variables (for example `STREAM_STT_*`, `TTS_SEGMENT_*`) are available in `.env.example`.
 
@@ -401,7 +404,7 @@ Add to `claude_desktop_config.json` (Windows: `%APPDATA%\Claude\claude_desktop_c
 {
   "mcpServers": {
     "voice-autopilot": {
-      "command": "python",
+      "command": "D:\\Projects\\Voice-Autopilot\\.venv\\Scripts\\python.exe",
       "args": ["D:\\Projects\\Voice-Autopilot\\Backend\\mcp\\mcp_server.py"],
       "env": {
         "PYTHONPATH": "D:\\Projects\\Voice-Autopilot\\Backend"
@@ -472,7 +475,28 @@ Calendar conflict and reschedule:
 ![image-20260206023805388](assets/image-20260206023805388.png)
 ![image-20260206023948432](assets/image-20260206023948432.png)
 
-### 4. History Record
+### 4. Settings Page
+
+Page: `/settings` — configure connectors and calendar mode without touching `.env`.
+
+| Section | What you can do |
+|---------|-----------------|
+| **Slack** | Toggle on/off; set Incoming Webhook URL |
+| **Email (SMTP)** | Toggle on/off; set host, port, credentials, SSL |
+| **Linear** | Toggle on/off; set API key and Team ID |
+| **Calendar mode** | Switch between **Playwright** (browser automation, default) and **Google Calendar API** (OAuth2) |
+| **Google Calendar API** | Enter Client ID + Client Secret → click **Connect** → OAuth2 in new tab → tokens saved automatically |
+
+Settings are stored in `Backend/settings.json` and override corresponding `.env` values. Sensitive fields are masked in the UI.
+
+**Google Calendar API one-time setup:**
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) → APIs & Services → Credentials
+2. Create an **OAuth 2.0 Client ID** (type: **Web application**)
+3. Add authorized redirect URI: `http://localhost:8888/settings/google-calendar/callback`
+4. Enter the Client ID and Client Secret in the Settings page → **Save** → **Connect Google Calendar**
+
+### 5. History Record
 
 Page: `/record`, with type filtering, detail view, and failed-action retry.
 
@@ -497,6 +521,12 @@ Page: `/record`, with type filtering, detail view, and failed-action retry.
 | `/autopilot/runs` | GET | Run history list (pagination/filtering) |
 | `/autopilot/runs/{run_id}` | GET | Single run details |
 | `/autopilot/ingest` | POST | Re-index knowledge base |
+| `/settings` | GET | Return current settings (sensitive fields masked) |
+| `/settings` | PUT | Save settings (preserves existing secrets when `***` sent) |
+| `/settings/google-calendar/auth-url` | GET | Generate Google OAuth2 authorization URL |
+| `/settings/google-calendar/callback` | GET | OAuth2 redirect handler (stores tokens, redirects to frontend) |
+| `/settings/google-calendar/status` | GET | Check Google Calendar connection status |
+| `/settings/google-calendar/disconnect` | POST | Clear stored Google tokens |
 
 ---
 
@@ -544,17 +574,19 @@ Future expansion suggestions: E2E tests, performance benchmarks, concurrent load
 
 ---
 
-<a id="playwright-calendar-automation-deep-dive"></a>
-## Playwright Calendar Automation Deep Dive
+<a id="calendar-integration-deep-dive"></a>
+## Calendar Integration Deep Dive
 
-### Why Playwright
+The calendar mode can be switched at runtime on the **Settings** page without restarting the server.
+
+### Mode 1 — Playwright (Browser Automation, Default)
 
 Compared with OAuth-heavy Calendar API integration, this approach is faster to operationalize:
 - No OAuth client configuration
 - Reuses real user login state + MFA
 - Persistent sessions reduce repeated login overhead
 
-### Implementation Highlights
+**Implementation Highlights:**
 
 1. **Persistent context**: `launch_persistent_context` + `Backend/chrome_profile/`.
 2. **Login detection**: URL + core DOM signals.
@@ -563,12 +595,28 @@ Compared with OAuth-heavy Calendar API integration, this approach is faster to o
 5. **Form fill automation**: open modal via `c` shortcut and fill by bilingual label matching.
 6. **Error handling**: layered handling for timeout, Playwright errors, and generic fallback.
 
-### Production Notes
+**Production Notes:**
 
 - Prefer semantic selectors to reduce breakage after UI updates
 - Save failure screenshots and integrate alerting
 - Consider context pooling and rate limiting for high concurrency
 - Protect `chrome_profile` (contains sensitive session credentials)
+
+### Mode 2 — Google Calendar API v3 (OAuth2)
+
+Uses the official Google Calendar API instead of browser automation. Suitable when programmatic access is preferred or when Playwright session management is impractical.
+
+**How it works:**
+
+1. User enters Client ID + Client Secret on the Settings page and saves.
+2. Clicks **Connect Google Calendar** → backend generates an OAuth2 authorization URL.
+3. User grants permissions in a new tab; Google redirects to the backend callback.
+4. Backend exchanges the code for tokens and stores them in `Backend/settings.json`.
+5. On every calendar action the access token is refreshed automatically if expired.
+
+**Conflict detection** uses `events.list()` with `timeMin`/`timeMax` — no browser required.
+
+**Implementation entry point:** `Backend/connectors/google_calendar_api.py`
 
 ---
 
@@ -576,11 +624,15 @@ Compared with OAuth-heavy Calendar API integration, this approach is faster to o
 ## Code Entry Points
 
 - Orchestration: `Backend/api/autopilot.py`
+- Settings API + OAuth2 flow: `Backend/api/settings.py`
+- Settings persistence: `Backend/store/settings_store.py`
 - Structured extraction: `Backend/chat/autopilot_extractor.py`
 - Calendar slot extraction: `Backend/chat/calendar_extractor.py`
 - Reply drafting: `Backend/chat/reply_drafter.py`
 - Schema definitions: `Backend/business/autopilot_schema.json`
-- Calendar automation: `Backend/tools/calendar_agent.py`
+- Calendar automation (Playwright): `Backend/tools/calendar_agent.py`
+- Calendar automation (API): `Backend/connectors/google_calendar_api.py`
+- Action routing: `Backend/actions/dispatcher.py`
 - RAG: `Backend/rag/ingest.py`, `Backend/rag/retrieve.py`
 - Audit logs: `Backend/store/db.py`, `Backend/store/runs.py`
 - Startup warmup pool: `Backend/utils/warmup/`
