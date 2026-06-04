@@ -17,45 +17,37 @@ import {
 } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
 import { useI18n } from "../../i18n/LanguageContext.jsx";
-import { postAPI, getAPI } from "../../utils/api";
+import { getAPI, postAPI, putAPI } from "../../utils/api";
 import "./index.scss";
 
 const { Title, Text } = Typography;
 
-const BACKEND = "http://localhost:8888";
-
 async function fetchSettings() {
-  const r = await fetch(`${BACKEND}/settings`);
-  if (!r.ok) throw new Error("fetch settings failed");
-  return r.json();
+  const res = await getAPI("/settings");
+  return res.data;
 }
 
 async function saveSettings(body) {
-  const r = await fetch(`${BACKEND}/settings`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error("save settings failed");
-  return r.json();
+  const res = await putAPI("/settings", body);
+  return res.data;
 }
 
 async function fetchGcStatus() {
-  const r = await fetch(`${BACKEND}/settings/google-calendar/status`);
-  if (!r.ok) return { has_credentials: false, is_connected: false };
-  return r.json();
+  try {
+    const res = await getAPI("/settings/google-calendar/status");
+    return res.data;
+  } catch {
+    return { has_credentials: false, is_connected: false };
+  }
 }
 
 async function fetchAuthUrl() {
-  const r = await fetch(`${BACKEND}/settings/google-calendar/auth-url`);
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.error || "Failed to get auth URL");
-  return data.auth_url;
+  const res = await getAPI("/settings/google-calendar/auth-url");
+  return res.data.auth_url;
 }
 
 async function disconnectGoogle() {
-  const r = await fetch(`${BACKEND}/settings/google-calendar/disconnect`, { method: "POST" });
-  if (!r.ok) throw new Error("disconnect failed");
+  await postAPI("/settings/google-calendar/disconnect");
 }
 
 export default function Settings() {
