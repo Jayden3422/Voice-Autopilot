@@ -6,6 +6,8 @@ export function useAudioRecorder({ onBlob }) {
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
   const shouldSendRef = useRef(true);
+  const onBlobRef = useRef(onBlob);
+  onBlobRef.current = onBlob;
 
   const stopStream = () => {
     if (streamRef.current) {
@@ -48,7 +50,7 @@ export function useAudioRecorder({ onBlob }) {
       shouldSendRef.current = true;
       if (!send || !chunks.length) return;
       const blob = new Blob(chunks, { type: "audio/webm" });
-      await onBlob(blob);
+      await onBlobRef.current(blob);
     };
 
     recorder.start();

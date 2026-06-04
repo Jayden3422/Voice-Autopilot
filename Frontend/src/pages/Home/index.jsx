@@ -105,6 +105,8 @@ const Home = () => {
   };
 
   const handleStopRecording = () => {
+    // Stop speech first to clear live transcript immediately, then stop recorder.
+    // (Original deferred speech stop to recorder.onstop — same net effect.)
     speech.stop();
     setLiveTranscript("");
     recorder.stopRecording(true);
