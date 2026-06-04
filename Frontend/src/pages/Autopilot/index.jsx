@@ -1,26 +1,17 @@
+// Frontend/src/pages/Autopilot/index.jsx
 import { useState, useRef, useEffect } from "react";
 import {
-  Button,
-  Input,
-  Card,
-  Collapse,
-  Tag,
-  Checkbox,
-  message as AntMessage,
-  Spin,
-  Typography,
-  Space,
-  Divider,
+  Button, Input, Card, Collapse, Tag, Checkbox,
+  message as AntMessage, Spin, Typography, Space, Divider,
 } from "antd";
 import {
-  AudioOutlined,
-  SendOutlined,
-  CheckCircleOutlined,
-  CloseCircleOutlined,
-  ExclamationCircleOutlined,
+  AudioOutlined, SendOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import { useI18n } from "../../i18n/LanguageContext.jsx";
 import * as api from "../../utils/api";
+import { useSpeechRecognition } from "../../hooks/useSpeechRecognition.js";
+import { useAudioRecorder } from "../../hooks/useAudioRecorder.js";
 import "./index.scss";
 
 const { TextArea } = Input;
@@ -53,15 +44,9 @@ const formatPlainTextAsHtml = (text = "") => {
     .join("");
 };
 
-const getSpeechRecognitionCtor = () => {
-  if (typeof window === "undefined") return null;
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
-};
-
 const Autopilot = () => {
   const { t, lang } = useI18n();
   const [inputText, setInputText] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
   const [runResult, setRunResult] = useState(null);
@@ -72,12 +57,36 @@ const Autopilot = () => {
   const [rescheduleInputs, setRescheduleInputs] = useState({});
   const [rescheduleLoading, setRescheduleLoading] = useState({});
   const [rescheduleRecordingIndex, setRescheduleRecordingIndex] = useState(null);
-  const rescheduleRecorderRef = useRef(null);
-  const speechRecognitionRef = useRef(null);
-  const speechRecognitionActiveRef = useRef(false);
+
   const speechBaseTextRef = useRef("");
-  const speechFinalTextRef = useRef("");
-  const isRecordingRef = useRef(false);
+  const rescheduleIndexRef = useRef(null);
+
+  const speech = useSpeechRecognition({
+    lang,
+    onResult: ({ finalText, interimText }) => {
+      const base = (speechBaseTextRef.current || "").trim();
+      const spoken = `${finalText}${finalText && interimText ? " " : ""}${interimText}`.trim();
+      setInputText(base && spoken ? `${base}\n${spoken}` : spoken || base);
+    },
+  });
+
+  const rescheduleRecorder = useAudioRecorder({
+    onBlob: async (blob) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const b64 = reader.result.split(",")[1];
+        handleReschedule(rescheduleIndexRef.current, "audio", b64);
+      };
+      reader.readAsDataURL(blob);
+    },
+  });
+
+  useEffect(() => {
+    return () => {
+      speech.stop();
+      rescheduleRecorder.cleanup();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRun = async (mode, audioB64 = null, overrideText = null) => {
     setIsProcessing(true);
@@ -85,20 +94,14 @@ const Autopilot = () => {
     setConfirmResult(null);
     try {
       const body = { mode, locale: lang };
-      if (mode === "audio") {
-        body.audio_base64 = audioB64;
-      } else {
-        body.text = overrideText ?? inputText;
-      }
+      if (mode === "audio") { body.audio_base64 = audioB64; }
+      else { body.text = overrideText ?? inputText; }
       const res = await api.postAPI("/autopilot/run", body);
       const data = res?.data || res || {};
       setRunResult(data);
       setReplyDraft(data.reply_draft || {});
-      // Init action checks - all checked by default
       const checks = {};
-      (data.actions_preview || []).forEach((_, i) => {
-        checks[i] = true;
-      });
+      (data.actions_preview || []).forEach((_, i) => { checks[i] = true; });
       setActionChecks(checks);
       setEditedActions(data.actions_preview || []);
     } catch (err) {
@@ -114,25 +117,18 @@ const Autopilot = () => {
     setIsConfirming(true);
     try {
       const actions = editedActions.map((a, i) => ({
-        ...a,
-        confirmed: !!actionChecks[i],
-        skip: !actionChecks[i],
+        ...a, confirmed: !!actionChecks[i], skip: !actionChecks[i],
       }));
       const res = await api.postAPI("/autopilot/confirm", {
-        run_id: runResult.run_id,
-        actions,
+        run_id: runResult.run_id, actions,
       });
       const data = res?.data || res || {};
       setConfirmResult(data);
-      const results = data?.results || [];
-      const calendarFailed = results.some(
+      const calendarFailed = (data.results || []).some(
         (r) => r.action_type === "create_meeting" && (r.status === "failed" || r.status === "blocked")
       );
-      if (calendarFailed) {
-        AntMessage.warning(t("autopilot.confirmCalendarFailed"));
-      } else {
-        AntMessage.success(t("autopilot.confirmSuccess"));
-      }
+      if (calendarFailed) { AntMessage.warning(t("autopilot.confirmCalendarFailed")); }
+      else { AntMessage.success(t("autopilot.confirmSuccess")); }
     } catch (err) {
       console.error("Autopilot confirm error:", err);
       AntMessage.error(t("autopilot.confirmError"));
@@ -141,116 +137,14 @@ const Autopilot = () => {
     }
   };
 
-  useEffect(() => {
-    isRecordingRef.current = isRecording;
-  }, [isRecording]);
-
-  const stopLiveRecognition = () => {
-    speechRecognitionActiveRef.current = false;
-    const recognition = speechRecognitionRef.current;
-    speechRecognitionRef.current = null;
-    if (!recognition) return;
-
-    recognition.onresult = null;
-    recognition.onerror = null;
-    recognition.onend = null;
-    try {
-      recognition.stop();
-    } catch {
-      // ignore
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopLiveRecognition();
-      if (rescheduleRecorderRef.current) {
-        try {
-          rescheduleRecorderRef.current.stop();
-        } catch {
-          // ignore
-        }
-        rescheduleRecorderRef.current = null;
-      }
-    };
-  }, []);
-
-  const composeInputFromSpeech = (baseText, finalText, interimText) => {
-    const base = (baseText || "").trim();
-    const finalPart = (finalText || "").trim();
-    const interimPart = (interimText || "").trim();
-    const spoken = `${finalPart}${finalPart && interimPart ? " " : ""}${interimPart}`.trim();
-    if (!base) return spoken;
-    if (!spoken) return base;
-    return `${base}\n${spoken}`.trim();
-  };
-
-  const handleStartRecording = async () => {
-    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
-    if (!SpeechRecognitionCtor) {
-      AntMessage.error(t("errors.browserNotSupported"));
-      return;
-    }
-
-    stopLiveRecognition();
-
-    try {
-      const recognition = new SpeechRecognitionCtor();
-      recognition.lang = lang === "zh" ? "zh-CN" : "en-US";
-      recognition.continuous = true;
-      recognition.interimResults = true;
-
-      speechBaseTextRef.current = inputText;
-      speechFinalTextRef.current = "";
-      speechRecognitionActiveRef.current = true;
-
-      recognition.onresult = (event) => {
-        let finalText = speechFinalTextRef.current;
-        let interimText = "";
-
-        for (let i = event.resultIndex; i < event.results.length; i += 1) {
-          const transcript = (event.results[i][0]?.transcript || "").trim();
-          if (!transcript) continue;
-          if (event.results[i].isFinal) {
-            finalText = `${finalText} ${transcript}`.trim();
-          } else {
-            interimText = `${interimText} ${transcript}`.trim();
-          }
-        }
-
-        speechFinalTextRef.current = finalText;
-        setInputText(composeInputFromSpeech(speechBaseTextRef.current, finalText, interimText));
-      };
-
-      recognition.onerror = () => {
-        // keep silent on transient speech errors
-      };
-
-      recognition.onend = () => {
-        if (!speechRecognitionActiveRef.current || !isRecordingRef.current) {
-          return;
-        }
-        try {
-          recognition.start();
-        } catch {
-          // ignore restart failure
-        }
-      };
-
-      recognition.start();
-      speechRecognitionRef.current = recognition;
-      setIsRecording(true);
-    } catch (err) {
-      console.error("Autopilot speech recognition error:", err);
-      stopLiveRecognition();
-      setIsRecording(false);
-      AntMessage.error(t("errors.micDenied"));
-    }
+  const handleStartRecording = () => {
+    speechBaseTextRef.current = inputText;
+    const started = speech.start();
+    if (!started) AntMessage.error(t("errors.browserNotSupported"));
   };
 
   const handleStopRecording = () => {
-    stopLiveRecognition();
-    setIsRecording(false);
+    speech.stop();
   };
 
   const appendToAnalyzeInput = (text) => {
@@ -267,9 +161,7 @@ const Autopilot = () => {
     const start = payload.start_time || "";
     const end = payload.end_time || "";
     const tz = "America/Toronto";
-    if (lang === "zh") {
-      return `改期更新：将「${title}」调整为 ${date} ${start}-${end}（时区：${tz}）。`.trim();
-    }
+    if (lang === "zh") return `改期更新：将「${title}」调整为 ${date} ${start}-${end}（时区：${tz}）。`.trim();
     return `Reschedule update: move "${title}" to ${date} ${start}-${end} (Timezone: ${tz}).`.trim();
   };
 
@@ -279,11 +171,8 @@ const Autopilot = () => {
     setRescheduleLoading((prev) => ({ ...prev, [index]: true }));
     try {
       const body = { mode, locale: lang, action };
-      if (mode === "audio") {
-        body.audio_base64 = audioB64;
-      } else {
-        body.text = (rescheduleInputs[index] || "").trim();
-      }
+      if (mode === "audio") { body.audio_base64 = audioB64; }
+      else { body.text = (rescheduleInputs[index] || "").trim(); }
       const res = await api.postAPI("/autopilot/adjust-time", body);
       const data = res?.data || res || {};
       const rawText = (data.user_text || body.text || "").trim();
@@ -306,58 +195,37 @@ const Autopilot = () => {
       AntMessage.error(t("errors.browserNotSupported"));
       return;
     }
+    rescheduleIndexRef.current = index;
+    setRescheduleRecordingIndex(index);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      const chunks = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunks, { type: "audio/webm" });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const b64 = reader.result.split(",")[1];
-          handleReschedule(index, "audio", b64);
-        };
-        reader.readAsDataURL(blob);
-      };
-      recorder.start();
-      rescheduleRecorderRef.current = recorder;
-      setRescheduleRecordingIndex(index);
+      await rescheduleRecorder.startRecording();
     } catch {
       AntMessage.error(t("errors.micDenied"));
+      setRescheduleRecordingIndex(null);
     }
   };
 
   const handleRescheduleStopRecording = () => {
-    if (rescheduleRecorderRef.current) {
-      rescheduleRecorderRef.current.stop();
-      rescheduleRecorderRef.current = null;
-      setRescheduleRecordingIndex(null);
-    }
+    rescheduleRecorder.stopRecording(true);
+    setRescheduleRecordingIndex(null);
   };
 
   const handleActionPayloadEdit = (index, field, value) => {
     setEditedActions((prev) => {
       const copy = [...prev];
-      copy[index] = {
-        ...copy[index],
-        payload: { ...copy[index].payload, [field]: value },
-      };
+      copy[index] = { ...copy[index], payload: { ...copy[index].payload, [field]: value } };
       return copy;
     });
   };
 
   const anyChecked = Object.values(actionChecks).some(Boolean);
+  const isRecording = speech.isActive;
 
   return (
     <div className="autopilot-page">
       <Title level={3}>{t("autopilot.title")}</Title>
       <Text type="secondary">{t("autopilot.subtitle")}</Text>
 
-      {/* Input Section */}
       <Card className="autopilot-input-card" style={{ marginTop: 16 }}>
         <Space direction="vertical" style={{ width: "100%" }}>
           <TextArea
@@ -396,10 +264,8 @@ const Autopilot = () => {
         </div>
       )}
 
-      {/* Results Section */}
       {runResult && !isProcessing && (
         <div className="autopilot-results">
-          {/* Transcript */}
           {runResult.transcript && (
             <Card size="small" title={t("autopilot.transcript")} style={{ marginTop: 12 }}>
               <Text>{runResult.transcript}</Text>
@@ -407,21 +273,18 @@ const Autopilot = () => {
           )}
 
           <div className="autopilot-columns">
-            {/* Column 1: Structured JSON */}
             <Card size="small" title={t("autopilot.structuredData")} className="autopilot-col">
               <Collapse
                 size="small"
-                items={[
-                  {
-                    key: "json",
-                    label: t("autopilot.viewJson"),
-                    children: (
-                      <pre className="autopilot-json">
-                        {JSON.stringify(runResult.extracted, null, 2)}
-                      </pre>
-                    ),
-                  },
-                ]}
+                items={[{
+                  key: "json",
+                  label: t("autopilot.viewJson"),
+                  children: (
+                    <pre className="autopilot-json">
+                      {JSON.stringify(runResult.extracted, null, 2)}
+                    </pre>
+                  ),
+                }]}
               />
               <div style={{ marginTop: 8 }}>
                 <Text strong>{t("autopilot.intent")}: </Text>
@@ -448,7 +311,6 @@ const Autopilot = () => {
               )}
             </Card>
 
-            {/* Column 2: Evidence + Reply Draft */}
             <Card size="small" title={t("autopilot.evidenceAndDraft")} className="autopilot-col">
               <Text strong>{t("autopilot.evidence")}:</Text>
               {runResult.evidence?.length > 0 ? (
@@ -470,22 +332,13 @@ const Autopilot = () => {
                 {(replyDraft.from || replyDraft.to || replyDraft.subject) && (
                   <div className="autopilot-email-meta">
                     {replyDraft.from && (
-                      <div>
-                        <Text strong>{t("autopilot.emailFrom")}:</Text>{" "}
-                        <Text>{replyDraft.from}</Text>
-                      </div>
+                      <div><Text strong>{t("autopilot.emailFrom")}:</Text> <Text>{replyDraft.from}</Text></div>
                     )}
                     {replyDraft.to && (
-                      <div>
-                        <Text strong>{t("autopilot.emailTo")}:</Text>{" "}
-                        <Text>{replyDraft.to}</Text>
-                      </div>
+                      <div><Text strong>{t("autopilot.emailTo")}:</Text> <Text>{replyDraft.to}</Text></div>
                     )}
                     {replyDraft.subject && (
-                      <div>
-                        <Text strong>{t("autopilot.emailSubject")}:</Text>{" "}
-                        <Text>{replyDraft.subject}</Text>
-                      </div>
+                      <div><Text strong>{t("autopilot.emailSubject")}:</Text> <Text>{replyDraft.subject}</Text></div>
                     )}
                   </div>
                 )}
@@ -505,57 +358,46 @@ const Autopilot = () => {
               )}
             </Card>
 
-            {/* Column 3: Actions */}
             <Card size="small" title={t("autopilot.actions")} className="autopilot-col">
               {editedActions.map((action, i) => (
                 <div key={i} className="autopilot-action-item">
                   <Checkbox
                     checked={!!actionChecks[i]}
-                    onChange={(e) =>
-                      setActionChecks((prev) => ({ ...prev, [i]: e.target.checked }))
-                    }
+                    onChange={(e) => setActionChecks((prev) => ({ ...prev, [i]: e.target.checked }))}
                   >
                     <Tag
                       color={
-                        action.action_type === "create_meeting"
-                          ? "purple"
-                          : action.action_type === "send_slack_summary"
-                          ? "cyan"
-                          : action.action_type === "create_ticket"
-                          ? "orange"
+                        action.action_type === "create_meeting" ? "purple"
+                          : action.action_type === "send_slack_summary" ? "cyan"
+                          : action.action_type === "create_ticket" ? "orange"
                           : "default"
                       }
                     >
                       {action.action_type}
                     </Tag>
-                    <Text type="secondary">
-                      {" "}
-                      confidence: {action.confidence}
-                    </Text>
+                    <Text type="secondary"> confidence: {action.confidence}</Text>
                   </Checkbox>
                   <div className="autopilot-action-preview">{action.preview}</div>
                   <Collapse
                     size="small"
-                    items={[
-                      {
-                        key: `payload-${i}`,
-                        label: t("autopilot.editPayload"),
-                        children: (
-                          <div className="autopilot-payload-fields">
-                            {Object.entries(action.payload || {}).map(([k, v]) => (
-                              <div key={k} className="autopilot-payload-field">
-                                <Text strong>{k}: </Text>
-                                <Input
-                                  size="small"
-                                  value={typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}
-                                  onChange={(e) => handleActionPayloadEdit(i, k, e.target.value)}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        ),
-                      },
-                    ]}
+                    items={[{
+                      key: `payload-${i}`,
+                      label: t("autopilot.editPayload"),
+                      children: (
+                        <div className="autopilot-payload-fields">
+                          {Object.entries(action.payload || {}).map(([k, v]) => (
+                            <div key={k} className="autopilot-payload-field">
+                              <Text strong>{k}: </Text>
+                              <Input
+                                size="small"
+                                value={typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}
+                                onChange={(e) => handleActionPayloadEdit(i, k, e.target.value)}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ),
+                    }]}
                   />
                 </div>
               ))}
@@ -571,13 +413,8 @@ const Autopilot = () => {
             </Card>
           </div>
 
-          {/* Execution Results */}
           {confirmResult && (
-            <Card
-              size="small"
-              title={t("autopilot.executionResults")}
-              style={{ marginTop: 12 }}
-            >
+            <Card size="small" title={t("autopilot.executionResults")} style={{ marginTop: 12 }}>
               {confirmResult.results?.map((r, i) => (
                 <div key={i} className="autopilot-exec-result">
                   {STATUS_ICONS[r.status] || STATUS_ICONS.failed}
@@ -586,11 +423,7 @@ const Autopilot = () => {
                     {r.status}
                   </Tag>
                   {r.result?.summary && <Text>{r.result.summary}</Text>}
-                  {r.result?.url && (
-                    <a href={r.result.url} target="_blank" rel="noreferrer">
-                      {r.result.url}
-                    </a>
-                  )}
+                  {r.result?.url && <a href={r.result.url} target="_blank" rel="noreferrer">{r.result.url}</a>}
                   {r.result?.error && <Text type="danger">{r.result.error}</Text>}
                   {r.result?.message && <Text>{r.result.message}</Text>}
                   {r.status === "blocked" && r.action_type === "create_meeting" && (
@@ -598,14 +431,10 @@ const Autopilot = () => {
                       <Input
                         placeholder={t("autopilot.reschedulePlaceholder")}
                         value={rescheduleInputs[i] || ""}
-                        onChange={(e) =>
-                          setRescheduleInputs((prev) => ({ ...prev, [i]: e.target.value }))
-                        }
+                        onChange={(e) => setRescheduleInputs((prev) => ({ ...prev, [i]: e.target.value }))}
                         onPressEnter={(e) => {
                           e.preventDefault();
-                          if ((rescheduleInputs[i] || "").trim()) {
-                            handleReschedule(i, "text");
-                          }
+                          if ((rescheduleInputs[i] || "").trim()) handleReschedule(i, "text");
                         }}
                         disabled={rescheduleLoading[i]}
                       />
