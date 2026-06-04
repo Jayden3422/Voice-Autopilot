@@ -6,13 +6,15 @@ const getCtor = () => {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 };
 
-export function useSpeechRecognition({ lang, onResult }) {
+export function useSpeechRecognition({ lang, onResult, onError }) {
   const [isActive, setIsActive] = useState(false);
   const recognitionRef = useRef(null);
   const activeRef = useRef(false);
   const finalTextRef = useRef("");
   const onResultRef = useRef(onResult);
   onResultRef.current = onResult;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
 
   const stop = () => {
     activeRef.current = false;
@@ -57,7 +59,11 @@ export function useSpeechRecognition({ lang, onResult }) {
       onResultRef.current({ finalText, interimText });
     };
 
-    r.onerror = () => {};
+    r.onerror = (event) => {
+      if (event.error === "not-allowed" && onErrorRef.current) {
+        onErrorRef.current(event);
+      }
+    };
 
     r.onend = () => {
       // activeRef check is sufficient: stop() nulls r.onend synchronously before calling r.stop(),

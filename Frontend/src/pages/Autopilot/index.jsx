@@ -63,6 +63,7 @@ const Autopilot = () => {
 
   const speech = useSpeechRecognition({
     lang,
+    onError: () => AntMessage.error(t("errors.micDenied")),
     onResult: ({ finalText, interimText }) => {
       const base = (speechBaseTextRef.current || "").trim();
       const spoken = `${finalText}${finalText && interimText ? " " : ""}${interimText}`.trim();
