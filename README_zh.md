@@ -301,6 +301,8 @@ pip install -r requirements.txt
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
+> **Windows 注意：** `g2pw`（已含于 `requirements.txt`）在读取中文字符文件时未指定编码，Windows 默认使用 `cp1252` 会导致中文 TTS 首次合成崩溃。启动后端时加上 Python 的 UTF-8 模式参数即可解决，详见[运行](#run-zh)一节。
+
 下载 Piper TTS 语音模型（仅需执行一次）：
 
 ```bash
@@ -364,8 +366,10 @@ npm run dev
 
 ```bash
 cd Backend
-python main.py
+python -X utf8 main.py
 ```
+
+> **`-X utf8`** 开启 Python 的 UTF-8 模式，Windows 下中文 TTS 必须加此参数（`g2pw` 读取字符文件时未指定编码）。macOS/Linux 默认已是 UTF-8，加此参数无副作用。
 
 启动时预热池在后台自动运行，预初始化所有重型组件：
 
@@ -590,7 +594,7 @@ python -m pytest tests/test_autopilot.py -v
 - Whisper `small` 在 CPU 上较慢（可考虑 `tiny`）
 - 当前仅支持单日事件
 - Piper TTS 冷启动：ONNX Runtime 按输入形状缓存执行计划；预热池使用与 `TTS_FIRST_SEGMENT_CHARS` 匹配的代表性长度句子预热，确保缓存的执行计划与真实请求一致——预热完成后首次调用即为快速
-- 中文 Piper TTS 依赖 `torch`（CPU 版，约 300 MB）；英文无 PyTorch 依赖
+- 中文 Piper TTS 依赖 `torch`（CPU 版，约 125 MB）、`g2pw` 和 `unicode_rbnf`；英文无 PyTorch 依赖。Windows 下须以 `python -X utf8 main.py` 启动，否则 `g2pw` 读取字符文件时会因 `cp1252` 编码报错。
 
 ---
 

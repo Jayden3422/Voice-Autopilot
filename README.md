@@ -283,6 +283,8 @@ Install PyTorch (CPU-only, required for Chinese TTS phonemization):
 pip install torch --index-url https://download.pytorch.org/whl/cpu
 ```
 
+> **Windows note:** `g2pw` (installed via `requirements.txt`) opens Chinese character files without an explicit encoding, which defaults to `cp1252` on Windows and causes a crash on first Chinese TTS synthesis. Start the backend with Python's UTF-8 mode flag to fix it — see the [Run](#run) section.
+
 Download Piper TTS voice models (run once):
 
 ```bash
@@ -346,8 +348,10 @@ npm run dev
 
 ```bash
 cd Backend
-python main.py
+python -X utf8 main.py
 ```
+
+> **`-X utf8`** enables Python's UTF-8 mode, required on Windows for Chinese TTS (`g2pw` reads character files without an explicit encoding). Safe to use on all platforms; no effect on macOS/Linux where UTF-8 is already the default.
 
 On startup the warmup pool runs in the background and pre-initializes all heavy components:
 
@@ -570,7 +574,7 @@ Future expansion suggestions: E2E tests, performance benchmarks, concurrent load
 - Whisper `small` can be slow on CPU (consider `tiny` for speed)
 - Current implementation supports same-day events only
 - Piper TTS cold-start: ONNX Runtime caches execution plans per input shape; the warmup pool synthesizes representative-length sentences (matching `TTS_FIRST_SEGMENT_CHARS`) so the cached plan aligns with real requests — first real call is fast after warmup completes
-- Piper Chinese TTS requires `torch` (CPU-only, ~300 MB); English TTS has no PyTorch dependency
+- Piper Chinese TTS requires `torch` (CPU-only, ~125 MB), `g2pw`, and `unicode_rbnf`; English TTS has no PyTorch dependency. On Windows, start with `python -X utf8 main.py` to prevent a `cp1252` encoding error in `g2pw`.
 
 ---
 

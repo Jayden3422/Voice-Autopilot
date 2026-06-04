@@ -18,6 +18,11 @@ faster-whisper>=1.1.0
 
 # ─── Speech synthesis (local, offline) ───
 piper-tts>=1.4.1
+g2pw>=0.1.1            # Chinese phonemizer — indirect dep of piper-tts >=1.4.2
+unicode_rbnf>=2.0.0    # Chinese number-to-words — indirect dep of piper-tts >=1.4.2
+# PyTorch (CPU-only, ~125 MB) is also required for Chinese TTS.
+# Install separately (special index URL):
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
 
 # ─── Browser automation (Calendar — Playwright mode) ───
 playwright>=1.50.1
