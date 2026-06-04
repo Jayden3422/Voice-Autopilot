@@ -1,18 +1,17 @@
-import http from './http'
+import request from './request.js'
 
-// get请求
-export function getAPI(url, params){
-    return http.get(url, params)
+export function getAPI(url, params) {
+  return request({ method: 'get', url, params })
 }
-// post请求
-export function postAPI(url, params){
-    return http.post(url, params)
+
+export function postAPI(url, data) {
+  return request({ method: 'post', url, data })
 }
-// put 请求
-export function putSomeAPI(url, params){
-    return http.put(url, params)
+
+export function putAPI(url, data) {
+  return request({ method: 'put', url, data })
 }
-// delete 请求
-export function deleteListAPI(url, params){
-    return http.delete(url, params)
+
+export function deleteListAPI(url, params) {
+  return request({ method: 'delete', url, params })
 }
