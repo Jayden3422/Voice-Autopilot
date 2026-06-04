@@ -29,6 +29,7 @@ from tools.speech import (
 from chat.calendar_extractor import extract_calendar_event
 from tools.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
+from api.settings import router as settings_router
 from store.runs import create_run, update_run
 from utils.warmup import run_all as _warmup_run_all
 
@@ -41,6 +42,7 @@ async def _lifespan(_: FastAPI):
 
 app = FastAPI(title="Voice Schedule Assistant", lifespan=_lifespan)
 app.include_router(autopilot_router)
+app.include_router(settings_router)
 logger = logging.getLogger(__name__)
 
 app.add_middleware(

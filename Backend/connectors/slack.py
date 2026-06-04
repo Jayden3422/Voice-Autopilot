@@ -25,7 +25,11 @@ async def dry_run(payload: dict) -> dict:
 
 async def execute(payload: dict) -> dict:
     """Send a message to Slack via webhook."""
-    url = WEBHOOK_URL
+    try:
+        import store.settings_store as ss
+        url = ss.get_connector("slack").get("webhook_url", "") or WEBHOOK_URL
+    except Exception:
+        url = WEBHOOK_URL
     if not url:
         return {"status": "failed", "error": "SLACK_WEBHOOK_URL not configured"}
 

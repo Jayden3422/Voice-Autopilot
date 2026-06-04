@@ -14,7 +14,11 @@ PRIORITY_MAP = {"low": 4, "medium": 3, "high": 2, "urgent": 1}
 
 
 def _get_headers() -> dict:
-    api_key = os.getenv("LINEAR_API_KEY", "")
+    try:
+        import store.settings_store as ss
+        api_key = ss.get_connector("linear").get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
+    except Exception:
+        api_key = os.getenv("LINEAR_API_KEY", "")
     return {
         "Authorization": api_key,
         "Content-Type": "application/json",
@@ -35,14 +39,21 @@ async def dry_run(payload: dict) -> dict:
 
 async def execute(payload: dict) -> dict:
     """Create an issue in Linear."""
-    api_key = os.getenv("LINEAR_API_KEY", "")
+    try:
+        import store.settings_store as ss
+        lin_cfg = ss.get_connector("linear")
+        api_key = lin_cfg.get("api_key", "") or os.getenv("LINEAR_API_KEY", "")
+        default_team_id = lin_cfg.get("team_id", "") or os.getenv("LINEAR_TEAM_ID", "")
+    except Exception:
+        api_key = os.getenv("LINEAR_API_KEY", "")
+        default_team_id = os.getenv("LINEAR_TEAM_ID", "")
     if not api_key:
         return {"status": "failed", "error": "LINEAR_API_KEY not configured"}
 
     title = payload.get("title", "Untitled Issue")
     description = payload.get("description", "")
     priority = payload.get("priority", "medium")
-    team_id = payload.get("team_id") or os.getenv("LINEAR_TEAM_ID", "")
+    team_id = payload.get("team_id") or default_team_id
 
     priority_num = PRIORITY_MAP.get(priority, 3)
 

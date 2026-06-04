@@ -36,6 +36,13 @@ async def dry_run_action(action: dict) -> dict:
         return {"preview": f"Preview error: {str(e)[:200]}"}
 
 
+_CONNECTOR_NAMES = {
+    "send_slack_summary": "slack",
+    "create_ticket": "linear",
+    "send_email_followup": "email",
+}
+
+
 async def execute_action(action: dict, lang: str = "en") -> dict:
     """Execute a single confirmed action."""
     action_type = action.get("action_type", "none")
@@ -46,6 +53,20 @@ async def execute_action(action: dict, lang: str = "en") -> dict:
 
     if action_type == "create_meeting":
         return await _execute_calendar(payload, lang)
+
+    # Check if connector is enabled in settings
+    connector_name = _CONNECTOR_NAMES.get(action_type)
+    if connector_name:
+        try:
+            import store.settings_store as ss
+            if not ss.is_connector_enabled(connector_name):
+                return {
+                    "action_type": action_type,
+                    "status": "skipped",
+                    "result": {"summary": f"{connector_name.capitalize()} connector is disabled in Settings"},
+                }
+        except Exception:
+            pass  # settings_store unavailable — proceed normally
 
     connector = CONNECTORS.get(action_type)
     if connector is None:
@@ -79,7 +100,18 @@ def _calendar_preview(payload: dict) -> dict:
 
 
 async def _execute_calendar(payload: dict, lang: str = "en") -> dict:
-    """Execute calendar event creation using the existing Playwright agent."""
+    """Execute calendar event creation — Playwright or Google Calendar API based on settings."""
+    try:
+        import store.settings_store as ss
+        mode = ss.get_calendar_mode()
+    except Exception:
+        mode = "playwright"
+
+    if mode == "api":
+        from connectors import google_calendar_api
+        return await google_calendar_api.execute(payload)
+
+    # ── Playwright path ────────────────────────────────────────────────────────
     try:
         from datetime import datetime
         from tools.calendar_agent import GoogleCalendarAgent

@@ -1,0 +1,79 @@
+.settings-page {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 24px 16px;
+
+  .settings-card {
+    margin-bottom: 16px;
+
+    .connector-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+
+      .connector-title {
+        font-weight: 600;
+        font-size: 15px;
+      }
+    }
+
+    .settings-field {
+      margin-bottom: 0;
+    }
+
+    .connector-fields {
+      .ant-form-item {
+        margin-bottom: 12px;
+
+        &:last-child {
+          margin-bottom: 0;
+        }
+      }
+    }
+
+    .field-row {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+
+      .field-grow {
+        flex: 1;
+        min-width: 0;
+        margin-bottom: 0;
+      }
+
+      .field-port {
+        width: 100px;
+        flex-shrink: 0;
+        margin-bottom: 0;
+
+        .ant-input-number {
+          width: 100%;
+        }
+      }
+
+      .field-ssl {
+        flex-shrink: 0;
+        margin-bottom: 0;
+      }
+    }
+
+    .calendar-mode-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .gc-api-config {
+      margin-top: 16px;
+    }
+
+    .gc-connect-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+  }
+}
