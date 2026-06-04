@@ -574,7 +574,7 @@ Future expansion suggestions: E2E tests, performance benchmarks, concurrent load
 - Whisper `small` can be slow on CPU (consider `tiny` for speed)
 - Current implementation supports same-day events only
 - Piper TTS cold-start: ONNX Runtime caches execution plans per input shape; the warmup pool synthesizes representative-length sentences (matching `TTS_FIRST_SEGMENT_CHARS`) so the cached plan aligns with real requests — first real call is fast after warmup completes
-- Piper Chinese TTS requires `torch` (CPU-only, ~125 MB), `g2pw`, and `unicode_rbnf`; English TTS has no PyTorch dependency. On Windows, start with `python -X utf8 main.py` to prevent a `cp1252` encoding error in `g2pw`.
+- Piper Chinese TTS requires `torch` (CPU-only, ~125 MB), `g2pw`, `unicode_rbnf`, and `sentence_stream` (all in `requirements.txt` except `torch`). On Windows, start with `python -X utf8 main.py` to prevent a `cp1252` encoding error in `g2pw`.
 
 ---
 

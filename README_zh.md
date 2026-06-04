@@ -594,7 +594,7 @@ python -m pytest tests/test_autopilot.py -v
 - Whisper `small` 在 CPU 上较慢（可考虑 `tiny`）
 - 当前仅支持单日事件
 - Piper TTS 冷启动：ONNX Runtime 按输入形状缓存执行计划；预热池使用与 `TTS_FIRST_SEGMENT_CHARS` 匹配的代表性长度句子预热，确保缓存的执行计划与真实请求一致——预热完成后首次调用即为快速
-- 中文 Piper TTS 依赖 `torch`（CPU 版，约 125 MB）、`g2pw` 和 `unicode_rbnf`；英文无 PyTorch 依赖。Windows 下须以 `python -X utf8 main.py` 启动，否则 `g2pw` 读取字符文件时会因 `cp1252` 编码报错。
+- 中文 Piper TTS 依赖 `torch`（CPU 版，约 125 MB）、`g2pw`、`unicode_rbnf` 和 `sentence_stream`（除 `torch` 外均已含于 `requirements.txt`）。Windows 下须以 `python -X utf8 main.py` 启动，否则 `g2pw` 读取字符文件时会因 `cp1252` 编码报错。
 
 ---
 
