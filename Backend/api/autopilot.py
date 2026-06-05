@@ -19,9 +19,9 @@ from actions.enrichment import (
     merge_extracted_actions,
     determine_final_status,
 )
-from chat.autopilot_extractor import extract_autopilot_json
-from chat.calendar_extractor import extract_calendar_event
-from chat.reply_drafter import generate_reply_draft
+from extraction.autopilot_extractor import extract_autopilot_json
+from extraction.calendar_extractor import extract_calendar_event
+from extraction.reply_drafter import generate_reply_draft
 from connectors.email_connector import build_email_content
 from rag.retrieve import retrieve
 from store.runs import create_run, update_run, get_run, list_runs

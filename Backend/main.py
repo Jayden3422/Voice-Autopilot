@@ -33,7 +33,7 @@ from speech.speech import (
   transcribe_audio,
   transcribe_audio_bytes,
 )
-from chat.calendar_extractor import extract_calendar_event
+from extraction.calendar_extractor import extract_calendar_event
 from actions.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
 from api.settings import router as settings_router

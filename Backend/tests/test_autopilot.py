@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 def test_schema_validation_valid():
     """A valid extraction output should pass schema validation."""
     import jsonschema
-    from chat.autopilot_extractor import _load_schema, _validate
+    from extraction.autopilot_extractor import _load_schema, _validate
 
     schema = _load_schema("autopilot_schema.json")
 
@@ -51,7 +51,7 @@ def test_schema_validation_valid():
 def test_schema_validation_invalid():
     """An invalid extraction output should fail schema validation."""
     import jsonschema
-    from chat.autopilot_extractor import _load_schema, _validate
+    from extraction.autopilot_extractor import _load_schema, _validate
 
     schema = _load_schema("autopilot_schema.json")
 
@@ -68,7 +68,7 @@ def test_schema_validation_invalid():
 def test_schema_validation_missing_required():
     """Missing required fields should fail validation."""
     import jsonschema
-    from chat.autopilot_extractor import _load_schema, _validate
+    from extraction.autopilot_extractor import _load_schema, _validate
 
     schema = _load_schema("autopilot_schema.json")
 

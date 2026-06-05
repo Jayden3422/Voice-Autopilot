@@ -19,8 +19,8 @@ load_dotenv(BACKEND_DIR.parent / ".env")
 import faiss  # noqa: F401  (pre-warm so rag.retrieve doesn't block the event loop)
 from actions.dispatcher import execute_action
 from ai_client import get_openai_client
-from chat.autopilot_extractor import extract_autopilot_json
-from chat.reply_drafter import generate_reply_draft
+from extraction.autopilot_extractor import extract_autopilot_json
+from extraction.reply_drafter import generate_reply_draft
 from connectors import email_connector, linear, slack
 from rag.retrieve import retrieve
 from store.runs import list_runs as _list_runs
