@@ -114,8 +114,8 @@ async def _execute_calendar(payload: dict, lang: str = "en") -> dict:
     # ── Playwright path ────────────────────────────────────────────────────────
     try:
         from datetime import datetime
-        from tools.calendar_agent import GoogleCalendarAgent
-        from tools.models import CalendarCommand
+        from connectors.calendar_agent import GoogleCalendarAgent
+        from actions.models import CalendarCommand
 
         d = payload.get("date")
         start = payload.get("start_time")
