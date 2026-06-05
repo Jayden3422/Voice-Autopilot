@@ -206,7 +206,7 @@ async def list_runs(limit: int = 20, run_type: str | None = None) -> str:
 @mcp.resource("autopilot://schema")
 def get_autopilot_schema() -> str:
     """The JSON schema used for extracting structured data from conversation transcripts."""
-    schema_path = BACKEND_DIR / "business" / "autopilot_schema.json"
+    schema_path = BACKEND_DIR / "schemas" / "autopilot_schema.json"
     return schema_path.read_text(encoding="utf-8")
 
 

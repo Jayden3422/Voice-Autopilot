@@ -13,12 +13,12 @@ from utils.timezone import now as now_toronto, TIMEZONE
 
 logger = logging.getLogger(__name__)
 
-BUSINESS_DIR = Path(__file__).resolve().parent.parent / "business"
+SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "schemas"
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 
 @lru_cache(maxsize=4)
 def _load_schema(name: str = "calendar_schema.json") -> dict:
-    with open(BUSINESS_DIR / name, "r", encoding="utf-8") as f:
+    with open(SCHEMAS_DIR / name, "r", encoding="utf-8") as f:
         return json.load(f)
 
 

@@ -13,12 +13,12 @@ from utils.timezone import now as now_toronto, TIMEZONE
 
 logger = logging.getLogger(__name__)
 
-BUSINESS_DIR = Path(__file__).resolve().parent.parent / "business"
+SCHEMAS_DIR = Path(__file__).resolve().parent.parent / "schemas"
 PROMPT_DIR = Path(__file__).resolve().parent / "prompt"
 
 @lru_cache(maxsize=4)
 def _load_schema(schema_name: str = "autopilot_schema.json") -> dict:
-    path = BUSINESS_DIR / schema_name
+    path = SCHEMAS_DIR / schema_name
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
