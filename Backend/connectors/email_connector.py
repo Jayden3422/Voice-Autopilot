@@ -1,5 +1,6 @@
 """Email connector via SMTP."""
 
+import html
 import logging
 import os
 import smtplib
@@ -84,3 +85,85 @@ async def execute(payload: dict) -> dict:
     except Exception as e:
         logger.exception("Email send error")
         return {"status": "failed", "error": str(e)[:300]}
+
+
+# ── Email content builder ────────────────────────────────────────────────────
+
+
+def _starts_with_greeting(text: str, lang: str) -> bool:
+    s = (text or "").strip().lower()
+    if not s:
+        return False
+    if lang == "zh":
+        return s.startswith(("你好", "您好", "嗨", "哈喽"))
+    return s.startswith(("hi", "hello", "dear"))
+
+
+def _text_to_html(text: str) -> str:
+    if not text:
+        return ""
+    paragraphs = []
+    for block in text.strip().split("\n\n"):
+        lines = [html.escape(line) for line in block.split("\n")]
+        paragraphs.append("<p>" + "<br/>".join(lines) + "</p>")
+    return "\n".join(paragraphs)
+
+
+def build_email_content(draft: dict, extracted: dict) -> dict:
+    """Build structured email content (subject, body_text, body_html, to, from) from draft and extracted data."""
+    from utils.lang import normalize_lang
+
+    lang = normalize_lang(extracted.get("conversation_language", "en"))
+    entities = extracted.get("entities") or {}
+    to_addr = entities.get("email") or ""
+    contact = entities.get("contact_name") or ""
+
+    reply_text = (draft or {}).get("reply_text", "").strip()
+    summary = extracted.get("summary", "")
+    subject_prefix = "Re: " if lang == "en" else "回复: "
+    subject = f"{subject_prefix}{summary[:60]}" if summary else ("Follow-up" if lang == "en" else "跟进")
+
+    greeting = ""
+    if not _starts_with_greeting(reply_text, lang):
+        if lang == "zh":
+            greeting = f"您好{contact}：" if contact else "您好："
+        else:
+            greeting = f"Hi {contact}," if contact else "Hello,"
+
+    signature = "Voice Autopilot (noreply)" if lang == "en" else "Voice Autopilot（noreply）"
+    footer = (
+        "This is an automated message from noreply. Please do not reply."
+        if lang == "en"
+        else "此邮件由 noreply 自动发送，请勿直接回复。"
+    )
+
+    body_parts = []
+    if greeting:
+        body_parts.append(greeting)
+    if reply_text:
+        body_parts.append(reply_text)
+    body_parts.append(signature)
+    body_parts.append(footer)
+    body_text = "\n\n".join(body_parts).strip()
+
+    body_html = "\n".join(filter(None, [
+        f"<p>{html.escape(greeting)}</p>" if greeting else "",
+        _text_to_html(reply_text),
+        f"<p><strong>{html.escape(signature)}</strong></p>",
+        f"<p class=\"email-footer\">{html.escape(footer)}</p>",
+    ]))
+
+    from_addr = os.getenv("SMTP_FROM") or os.getenv("SMTP_USER") or "noreply@example.com"
+    from_name = os.getenv("SMTP_FROM_NAME", "Voice Autopilot")
+    if "noreply" not in (from_name or "").lower():
+        from_name = f"{from_name} (noreply)"
+    from_display = f"{from_name} <{from_addr}>"
+
+    return {
+        "subject": subject,
+        "body_text": body_text,
+        "body_html": body_html,
+        "to": to_addr,
+        "from_display": from_display,
+        "from_name": from_name,
+    }

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import date, time
-from pydantic import BaseModel
+
 
 @dataclass
 class CalendarCommand:
@@ -16,10 +16,3 @@ class CalendarResult:
   success: bool # 创建成功与否
   conflict: bool # 冲突与否
   message: str  # 给用户的说明
-
-class VoiceResponse(BaseModel):
-  # /api/voice
-  user_text: str
-  ai_text: str
-  audio_base64: str  # 回复语音
-  session_id: str | None = None
