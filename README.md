@@ -7,7 +7,7 @@
 **Production-Grade AI Workflow Automation System**  
 *Voice-first scheduling + sales/support autopilot with structured extraction, RAG grounding, and modular action routing*
 
-[![Tests](https://img.shields.io/badge/tests-12%20passing-success)](Backend/tests/test_autopilot.py)
+[![Tests](https://img.shields.io/badge/tests-112%20passing-success)](Backend/tests/)
 [![Python](https://img.shields.io/badge/python-3.10.11-blue)](https://www.python.org/)
 [![React](https://img.shields.io/badge/react-19-61dafb)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/fastapi-0.136.3-009688)](https://fastapi.tiangolo.com/)
@@ -142,32 +142,29 @@ Voice-Autopilot/
 ├── Frontend/
 │   └── src/
 │       ├── pages/               # Home / Autopilot / Record / Settings
+│       ├── hooks/               # useAudioRecorder, useAudioPlayback, useSpeechRecognition
 │       ├── config/              # TTS and feature config
 │       ├── i18n/                # zh/en translations
 │       ├── utils/               # Axios wrapper
 │       └── router/              # route config
 ├── Backend/
-│   ├── main.py                  # FastAPI entry (/voice, /voice/ws, /calendar/text, /tts)
-│   ├── api/autopilot.py         # orchestration + APIs
-│   ├── api/settings.py          # Settings CRUD + Google OAuth2 flow
-│   ├── chat/                    # extraction, drafting, prompts
+│   ├── main.py                  # FastAPI entry point
+│   ├── api/                     # Routers: autopilot, voice, settings + Pydantic models
+│   ├── extraction/              # GPT extraction and reply drafting
 │   │   └── prompt/              # system prompt templates (.txt)
-│   ├── rag/                     # indexing + retrieval
-│   ├── rag_store/               # built FAISS index + embedding cache (runtime)
-│   ├── actions/dispatcher.py    # action routing (dry_run/execute); respects settings
-│   ├── connectors/              # Slack / Email / Linear / Google Calendar API
-│   ├── tools/                   # speech / calendar_agent / nlp / file_utils
-│   ├── utils/                   # shared utilities
-│   │   ├── timezone.py          # timezone helpers
-│   │   └── warmup/              # Startup warmup pool (Whisper / Piper / OpenAI / FAISS)
-│   ├── models/piper/            # Piper TTS voice models (zh_CN-xiao_ya / en_US-amy)
-│   ├── business/                # autopilot_schema / calendar_schema
-│   ├── store/                   # SQLite init + runs CRUD + settings_store
-│   ├── settings.json            # Runtime settings (auto-created; connector keys + calendar mode)
-│   ├── tests/                   # test_autopilot (12 tests) + test_tts
+│   ├── actions/                 # Business logic: dispatcher, enrichment, calendar helpers
+│   ├── connectors/              # Slack / Email / Linear / Calendar (Playwright + API)
+│   ├── rag/                     # FAISS indexing + retrieval
+│   ├── speech/                  # Whisper STT + Piper TTS
+│   ├── store/                   # SQLite (db, runs CRUD) + settings persistence + FastAPI deps
+│   ├── ai_client/               # OpenAI client factory (lru_cache singleton)
+│   ├── utils/                   # lang, timezone, file_utils, warmup pool
+│   ├── schemas/                 # autopilot_schema.json / calendar_schema.json
 │   ├── mcp/                     # MCP server and test client
-│   │   ├── mcp_server.py        # MCP Server (stdio transport)
-│   │   └── test_mcp_client.py   # MCP test client
+│   ├── tests/                   # 75 pytest tests across 5 files
+│   ├── models/piper/            # Piper TTS voice models (zh_CN-xiao_ya / en_US-amy)
+│   ├── rag_store/               # built FAISS index + embedding cache (runtime)
+│   ├── settings.json            # Runtime settings (auto-created; connector keys + calendar mode)
 │   └── chrome_profile/          # Playwright persistent browser session
 ├── knowledge_base/              # RAG docs (10 .md files)
 ├── requirements.txt
@@ -539,30 +536,37 @@ Page: `/record`, with type filtering, detail view, and failed-action retry.
 
 ### Testing Strategy
 
-- Covers critical paths: Schema, RAG, connectors, dispatcher, SQLite
-- Uses dry_run to avoid heavy external API mocking
-- Fast feedback: 12 tests in around 0.79 seconds
+Tests are written at the cheapest reliable layer: pure logic as unit tests, service logic as focused integration tests, external boundaries mocked only where necessary. See [Test_Design_Philosophy.md](Test_Design_Philosophy.md).
 
-### Coverage Matrix
-
-| Category | Count | Focus |
-|------|------|------|
-| Schema Validation | 3 | type checks, missing fields, error messages |
-| Knowledge Base (RAG) | 2 | file existence, chunking logic |
-| Connector Dry Run | 5 | Slack/Linear/Email/Calendar/None action |
-| Dispatcher | 1 | routing and fault tolerance |
-| SQLite CRUD | 1 | create/update/query run records |
-
-Run tests:
+### Backend — 75 tests (~4 s)
 
 ```bash
 cd Backend
-python -m pytest tests/test_autopilot.py -v
+python -m pytest tests/ -v
 ```
 
-Recommended CI: `GitHub Actions + pytest`.
+| File | Count | What it covers |
+|------|-------|----------------|
+| `test_autopilot.py` | 12 | Schema validation, RAG chunking, connector dry-runs, dispatcher routing, SQLite CRUD |
+| `test_lang.py` | 8 | `normalize_lang` — all locale variants and fallback defaults |
+| `test_calendar.py` | 22 | `resolve_date/time`, `enrich_calendar_title`, `prepare_payload_for_preview`, `finalize_payload`, `build_confirmation` |
+| `test_enrichment.py` | 22 | `build_rag_query`, `enrich_actions` (slack/email injection, urgency→priority), `append_confirmation_*`, `merge_extracted_actions`, `determine_final_status` |
+| `test_settings_api.py` | 11 | `_mask` (sensitive fields, empty values, no mutation) and `_merge_preserving_masked` (preserves secrets when `***` is sent) |
 
-Future expansion suggestions: E2E tests, performance benchmarks, concurrent load tests, frontend unit tests.
+### Frontend — 37 tests (Vitest + React Testing Library)
+
+```bash
+cd Frontend
+npm test
+```
+
+| File | Count | What it covers |
+|------|-------|----------------|
+| `translations.test.js` | 28 | All required UI keys present in both `en` and `zh`; both languages have identical top-level sections |
+| `api.test.js` | 5 | `getAPI/postAPI/putAPI/deleteListAPI` delegate correct HTTP method and forward config |
+| `useAudioRecorder.test.jsx` | 5 | Recording state machine: initial state, start, stop, `send=false` guard, cleanup — all browser APIs stubbed |
+
+Recommended CI: `GitHub Actions` running both `pytest` and `npm test`.
 
 ---
 
@@ -630,19 +634,22 @@ Uses the official Google Calendar API instead of browser automation. Suitable wh
 - Orchestration: `Backend/api/autopilot.py`
 - Settings API + OAuth2 flow: `Backend/api/settings.py`
 - Settings persistence: `Backend/store/settings_store.py`
-- Structured extraction: `Backend/chat/autopilot_extractor.py`
-- Calendar slot extraction: `Backend/chat/calendar_extractor.py`
-- Reply drafting: `Backend/chat/reply_drafter.py`
-- Schema definitions: `Backend/business/autopilot_schema.json`
-- Calendar automation (Playwright): `Backend/tools/calendar_agent.py`
+- Structured extraction: `Backend/extraction/autopilot_extractor.py`
+- Calendar slot extraction: `Backend/extraction/calendar_extractor.py`
+- Reply drafting: `Backend/extraction/reply_drafter.py`
+- Schema definitions: `Backend/schemas/autopilot_schema.json`
+- Calendar automation (Playwright): `Backend/connectors/calendar_agent.py`
 - Calendar automation (API): `Backend/connectors/google_calendar_api.py`
 - Action routing: `Backend/actions/dispatcher.py`
+- Action enrichment: `Backend/actions/enrichment.py`
+- Calendar payload helpers: `Backend/actions/calendar.py`
 - RAG: `Backend/rag/ingest.py`, `Backend/rag/retrieve.py`
+- Speech (STT + TTS): `Backend/speech/speech.py`
 - Audit logs: `Backend/store/db.py`, `Backend/store/runs.py`
 - Startup warmup pool: `Backend/utils/warmup/`
 - MCP Server: `Backend/mcp/mcp_server.py`
 - MCP test client: `Backend/mcp/test_mcp_client.py`
-- Tests: `Backend/tests/test_autopilot.py`
+- Tests: `Backend/tests/`
 
 ---
 
