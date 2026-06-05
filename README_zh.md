@@ -7,7 +7,7 @@
 **生产级 AI 工作流自动化系统**  
 *语音优先日程 + 销售/支持自动驾驶，具备结构化提取、RAG 依据、模块化动作路由*
 
-[![Tests](https://img.shields.io/badge/tests-12%20passing-success)](Backend/tests/test_autopilot.py)
+[![Tests](https://img.shields.io/badge/tests-112%20passing-success)](Backend/tests/)
 [![Python](https://img.shields.io/badge/python-3.10.11-blue)](https://www.python.org/)
 [![React](https://img.shields.io/badge/react-19-61dafb)](https://react.dev/)
 [![FastAPI](https://img.shields.io/badge/fastapi-0.136.3-009688)](https://fastapi.tiangolo.com/)
@@ -141,32 +141,29 @@ Voice-Autopilot/
 ├── Frontend/
 │   └── src/
 │       ├── pages/               # Home / Autopilot / Record / Settings
+│       ├── hooks/               # useAudioRecorder、useAudioPlayback、useSpeechRecognition
 │       ├── config/              # TTS 等功能配置
 │       ├── i18n/                # 中英双语翻译
 │       ├── utils/               # Axios 封装
 │       └── router/              # 路由配置
 ├── Backend/
-│   ├── main.py                  # FastAPI 入口（/voice, /voice/ws, /calendar/text, /tts）
-│   ├── api/autopilot.py         # Autopilot 编排与 API
-│   ├── api/settings.py          # 设置 CRUD + Google OAuth2 流程
-│   ├── chat/                    # 提取、草稿、Prompt
+│   ├── main.py                  # FastAPI 入口
+│   ├── api/                     # 路由器：autopilot、voice、settings + Pydantic 模型
+│   ├── extraction/              # GPT 提取与回复草稿
 │   │   └── prompt/              # 系统 Prompt 模板（.txt）
-│   ├── rag/                     # 索引与检索
-│   ├── rag_store/               # 已构建的 FAISS 索引 + 嵌入缓存（运行时）
-│   ├── actions/dispatcher.py    # 动作分发（dry_run/execute）；遵循设置
-│   ├── connectors/              # Slack / Email / Linear / Google Calendar API
-│   ├── tools/                   # speech / calendar_agent / nlp / file_utils
-│   ├── utils/                   # 共用工具
-│   │   ├── timezone.py          # 时区工具
-│   │   └── warmup/              # 启动预热池（Whisper / Piper / OpenAI / FAISS）
-│   ├── models/piper/            # Piper TTS 语音模型（zh_CN-xiao_ya / en_US-amy）
-│   ├── business/                # autopilot_schema / calendar_schema
-│   ├── store/                   # SQLite 初始化 + runs CRUD + settings_store
-│   ├── settings.json            # 运行时配置（自动生成；连接器凭证 + 日历模式）
-│   ├── tests/                   # test_autopilot（12 项）+ test_tts
+│   ├── actions/                 # 业务逻辑：dispatcher、enrichment、calendar helpers
+│   ├── connectors/              # Slack / Email / Linear / Calendar（Playwright + API）
+│   ├── rag/                     # FAISS 索引与检索
+│   ├── speech/                  # Whisper STT + Piper TTS
+│   ├── store/                   # SQLite（db、runs CRUD）+ 设置持久化 + FastAPI 依赖
+│   ├── ai_client/               # OpenAI 客户端工厂（lru_cache 单例）
+│   ├── utils/                   # lang、timezone、file_utils、warmup 预热池
+│   ├── schemas/                 # autopilot_schema.json / calendar_schema.json
 │   ├── mcp/                     # MCP 服务端与测试客户端
-│   │   ├── mcp_server.py        # MCP Server（stdio 传输）
-│   │   └── test_mcp_client.py   # MCP 测试客户端
+│   ├── tests/                   # 75 项 pytest 测试，分布于 5 个文件
+│   ├── models/piper/            # Piper TTS 语音模型（zh_CN-xiao_ya / en_US-amy）
+│   ├── rag_store/               # 已构建的 FAISS 索引 + 嵌入缓存（运行时）
+│   ├── settings.json            # 运行时配置（自动生成；连接器凭证 + 日历模式）
 │   └── chrome_profile/          # Playwright 持久化浏览器会话
 ├── knowledge_base/              # RAG 文档（10 个 .md 文件）
 ├── requirements.txt
@@ -559,30 +556,37 @@ python Backend/mcp/test_mcp_client.py search_knowledge_base
 
 ### 测试策略
 
-- 覆盖关键路径：Schema、RAG、连接器、Dispatcher、SQLite
-- 依赖 dry_run，避免对外部 API 做重度 Mock
-- 快速反馈（12 项测试约 0.79 秒）
+测试在最经济可靠的层次编写：纯逻辑用单元测试，服务层用集成测试，只在必要时 Mock 外部边界。详见 [Test_Design_Philosophy.md](Test_Design_Philosophy.md)。
 
-### 覆盖矩阵
-
-| 类别 | 数量 | 重点 |
-|------|------|------|
-| Schema 校验 | 3 | 类型校验、缺失字段、错误消息 |
-| 知识库 (RAG) | 2 | 文档存在性、分块逻辑 |
-| 连接器 Dry Run | 5 | Slack/Linear/Email/Calendar/None action |
-| Dispatcher | 1 | 路由与容错 |
-| SQLite CRUD | 1 | run 记录写入、更新、查询 |
-
-运行：
+### 后端 — 75 项测试（约 4 秒）
 
 ```bash
 cd Backend
-python -m pytest tests/test_autopilot.py -v
+python -m pytest tests/ -v
 ```
 
-建议 CI：`GitHub Actions + pytest`。
+| 文件 | 数量 | 覆盖内容 |
+|------|------|---------|
+| `test_autopilot.py` | 12 | Schema 校验、RAG 分块、连接器 dry-run、dispatcher 路由、SQLite CRUD |
+| `test_lang.py` | 8 | `normalize_lang`——所有 locale 变体与默认值 |
+| `test_calendar.py` | 22 | `resolve_date/time`、`enrich_calendar_title`、`prepare_payload_for_preview`、`finalize_payload`、`build_confirmation` |
+| `test_enrichment.py` | 22 | `build_rag_query`、`enrich_actions`（Slack/Email 注入、urgency→priority）、`append_confirmation_*`、`merge_extracted_actions`、`determine_final_status` |
+| `test_settings_api.py` | 11 | `_mask`（敏感字段、空值、不可变性）与 `_merge_preserving_masked`（发送 `***` 时保留原密钥） |
 
-未来扩展建议：E2E、性能基准、并发负载、前端单测。
+### 前端 — 37 项测试（Vitest + React Testing Library）
+
+```bash
+cd Frontend
+npm test
+```
+
+| 文件 | 数量 | 覆盖内容 |
+|------|------|---------|
+| `translations.test.js` | 28 | 中英双语所有必要 UI key 均存在；两种语言顶层结构一致 |
+| `api.test.js` | 5 | `getAPI/postAPI/putAPI/deleteListAPI` 正确委托 HTTP 方法并透传配置 |
+| `useAudioRecorder.test.jsx` | 5 | 录音状态机：初始状态、开始、停止、`send=false` 保护、cleanup——浏览器 API 全部 stub |
+
+建议 CI：`GitHub Actions` 同时运行 `pytest` 与 `npm test`。
 
 ---
 
@@ -649,19 +653,22 @@ python -m pytest tests/test_autopilot.py -v
 - 核心编排：`Backend/api/autopilot.py`
 - 设置 API + OAuth2 流程：`Backend/api/settings.py`
 - 设置持久化：`Backend/store/settings_store.py`
-- 结构化提取：`Backend/chat/autopilot_extractor.py`
-- 日历槽位提取：`Backend/chat/calendar_extractor.py`
-- 回复草稿：`Backend/chat/reply_drafter.py`
-- Schema 定义：`Backend/business/autopilot_schema.json`
-- 日历自动化（Playwright）：`Backend/tools/calendar_agent.py`
+- 结构化提取：`Backend/extraction/autopilot_extractor.py`
+- 日历槽位提取：`Backend/extraction/calendar_extractor.py`
+- 回复草稿：`Backend/extraction/reply_drafter.py`
+- Schema 定义：`Backend/schemas/autopilot_schema.json`
+- 日历自动化（Playwright）：`Backend/connectors/calendar_agent.py`
 - 日历自动化（API）：`Backend/connectors/google_calendar_api.py`
 - 动作路由：`Backend/actions/dispatcher.py`
+- 动作补全：`Backend/actions/enrichment.py`
+- 日历 Payload 工具函数：`Backend/actions/calendar.py`
 - RAG：`Backend/rag/ingest.py`、`Backend/rag/retrieve.py`
+- 语音（STT + TTS）：`Backend/speech/speech.py`
 - 审计日志：`Backend/store/db.py`、`Backend/store/runs.py`
 - 启动预热池：`Backend/utils/warmup/`
 - MCP Server：`Backend/mcp/mcp_server.py`
 - MCP 测试客户端：`Backend/mcp/test_mcp_client.py`
-- 测试：`Backend/tests/test_autopilot.py`
+- 测试：`Backend/tests/`
 
 ---
 
