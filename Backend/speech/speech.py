@@ -11,6 +11,8 @@ from faster_whisper import WhisperModel
 from opencc import OpenCC
 from piper import PiperVoice
 
+from utils.lang import normalize_lang as _normalize_lang
+
 cc = OpenCC("t2s")
 
 # STT
@@ -24,13 +26,6 @@ STT_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
 STT_BEST_OF = int(os.getenv("WHISPER_BEST_OF", "1"))
 STT_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").lower() not in {"0", "false", "no"}
 STT_NO_SPEECH_THRESHOLD = float(os.getenv("WHISPER_NO_SPEECH_THRESHOLD", "0.5"))
-
-
-def _normalize_lang(lang: str) -> str:
-  if not lang:
-    return "zh"
-  lang = lang.lower()
-  return "en" if lang.startswith("en") else "zh"
 
 
 def transcribe_audio(path: str, lang: str = "zh") -> str:
@@ -55,6 +50,24 @@ def transcribe_audio_bytes(audio_bytes: bytes, lang: str = "zh", suffix: str = "
     tmp_path = f.name
   try:
     return transcribe_audio(tmp_path, lang=lang)
+  finally:
+    try:
+      os.remove(tmp_path)
+    except Exception:
+      pass
+
+
+async def transcribe_audio_base64(audio_b64: str, lang: str = "en") -> str:
+  """Decode base64 audio, write to a temp file, and run Whisper STT."""
+  import asyncio
+  import base64
+
+  audio_bytes = base64.b64decode(audio_b64)
+  with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as f:
+    f.write(audio_bytes)
+    tmp_path = f.name
+  try:
+    return await asyncio.to_thread(transcribe_audio, tmp_path, lang)
   finally:
     try:
       os.remove(tmp_path)

@@ -27,7 +27,7 @@ async def warmup_whisper() -> None:
     Running one dummy inference here means the first real STT call is fast.
     """
     import numpy as np
-    from tools.speech import (
+    from speech.speech import (
         _model,
         STT_BEAM_SIZE,
         STT_BEST_OF,
@@ -66,7 +66,7 @@ async def warmup_piper_zh() -> None:
 
     After warmup the per-call latency drops to ~100–300 ms.
     """
-    from tools.speech import _synthesize_speech_sync
+    from speech.speech import _synthesize_speech_sync
     await asyncio.to_thread(_synthesize_speech_sync, "你好", "zh")
 
 
@@ -76,7 +76,7 @@ async def warmup_piper_en() -> None:
 
     Lighter than the Chinese warmup — no g2pW, espeak-ng phonemisation only.
     """
-    from tools.speech import _synthesize_speech_sync
+    from speech.speech import _synthesize_speech_sync
     await asyncio.to_thread(_synthesize_speech_sync, "Hello", "en")
 
 

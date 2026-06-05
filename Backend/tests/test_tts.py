@@ -1,7 +1,7 @@
 import os
 import wave
 from pathlib import Path
-from tools.speech import _synthesize_speech_sync
+from speech.speech import _synthesize_speech_sync
 
 ZH_TEXT = "你好，这是一段中文语音合成测试。"
 EN_TEXT = "Hello, this is an English text-to-speech test."

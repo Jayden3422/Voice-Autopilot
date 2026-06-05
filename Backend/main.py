@@ -21,10 +21,12 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 from ai_client import get_openai_client
+from utils.lang import normalize_lang as _normalize_lang
 
-from tools.models import VoiceResponse, CalendarCommand
-from tools.file_utils import save_temp_file
-from tools.speech import (
+from api.models import VoiceResponse
+from actions.models import CalendarCommand
+from utils.file_utils import save_temp_file
+from speech.speech import (
   delta_from_previous,
   segment_tts_text,
   synthesize_speech,
@@ -32,7 +34,7 @@ from tools.speech import (
   transcribe_audio_bytes,
 )
 from chat.calendar_extractor import extract_calendar_event
-from tools.calendar_agent import GoogleCalendarAgent
+from actions.calendar_agent import GoogleCalendarAgent
 from api.autopilot import router as autopilot_router
 from api.settings import router as settings_router
 from store.runs import create_run, update_run
@@ -261,12 +263,6 @@ async def _process_calendar_text(
 
   return await _build_voice_response(user_text, ai_text, normalized_lang, session_id, include_audio)
 
-
-def _normalize_lang(lang: str) -> str:
-  if not lang:
-    return "zh"
-  lang = lang.lower()
-  return "en" if lang.startswith("en") else "zh"
 
 
 def _msg(lang: str, key: str, table: dict) -> str:
