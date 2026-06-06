@@ -347,9 +347,9 @@ async def test_task_timeout_marks_failed():
 async def test_wall_clock_accuracy():
     p    = FakeProvider("slow", delay=0.1)
     pool = make_pool([WarmupTask(provider=p)])
-    t0   = asyncio.get_event_loop().time()
+    t0   = asyncio.get_running_loop().time()
     await pool.run_all()
-    assert (asyncio.get_event_loop().time() - t0) >= 0.1
+    assert (asyncio.get_running_loop().time() - t0) >= 0.1
 
 
 @pytest.mark.asyncio
