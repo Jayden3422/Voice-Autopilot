@@ -3,25 +3,16 @@ import io
 import os
 import re
 import tempfile
-import threading
 import wave
 from pathlib import Path
 
-from faster_whisper import WhisperModel
 from opencc import OpenCC
-from piper import PiperVoice
 
 from utils.lang import normalize_lang as _normalize_lang
 
 cc = OpenCC("t2s")
 
 # STT
-_model = WhisperModel(
-  "small",
-  device="cpu",
-  compute_type="int8",
-)
-
 STT_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "1"))
 STT_BEST_OF = int(os.getenv("WHISPER_BEST_OF", "1"))
 STT_VAD_FILTER = os.getenv("WHISPER_VAD_FILTER", "true").lower() not in {"0", "false", "no"}
@@ -29,8 +20,10 @@ STT_NO_SPEECH_THRESHOLD = float(os.getenv("WHISPER_NO_SPEECH_THRESHOLD", "0.5"))
 
 
 def transcribe_audio(path: str, lang: str = "zh") -> str:
+  import resources as _res
+  model = _res.whisper.get()
   normalized = _normalize_lang(lang)
-  segments, _ = _model.transcribe(
+  segments, _ = model.transcribe(
     path,
     language=normalized,
     beam_size=STT_BEAM_SIZE,
@@ -110,21 +103,10 @@ TTS_FIRST_SEGMENT_CHARS = int(os.getenv("TTS_FIRST_SEGMENT_CHARS", "16"))
 TTS_MIN_PUNCT_BREAK_CHARS = int(os.getenv("TTS_MIN_PUNCT_BREAK_CHARS", "8"))
 _TTS_BREAK_PUNCT = set("?!?!?;;,,?.")
 
-_piper_voices: dict[str, PiperVoice] = {}
-_piper_lock = threading.Lock()
 
-
-def _get_piper_voice(lang: str) -> PiperVoice:
-  normalized = _normalize_lang(lang)
-  if normalized in _piper_voices:
-    return _piper_voices[normalized]
-  with _piper_lock:
-    if normalized in _piper_voices:
-      return _piper_voices[normalized]
-    model_path = _PIPER_MODEL_BY_LANG.get(normalized, PIPER_ZH_MODEL)
-    voice = PiperVoice.load(model_path, use_cuda=False)
-    _piper_voices[normalized] = voice
-    return voice
+def _get_piper_voice(lang: str):
+  import resources as _res
+  return _res.piper_zh.get() if lang == "zh" else _res.piper_en.get()
 
 
 def _normalize_tts_text(text: str) -> str:
