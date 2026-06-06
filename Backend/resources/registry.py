@@ -4,9 +4,17 @@ from .base import ResourceProvider, ResourceStatus
 class ResourceRegistry:
     def __init__(self) -> None:
         self._providers: dict[str, ResourceProvider] = {}
+        self._frozen = False
 
     def register(self, provider: ResourceProvider) -> None:
+        if self._frozen:
+            raise ValueError("resource registry is frozen")
+        if provider.name in self._providers:
+            raise ValueError(f"resource '{provider.name}' is already registered")
         self._providers[provider.name] = provider
+
+    def freeze(self) -> None:
+        self._frozen = True
 
     def all(self) -> list[ResourceProvider]:
         return list(self._providers.values())

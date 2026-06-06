@@ -8,7 +8,7 @@ import {
   AudioOutlined, SendOutlined,
   CheckCircleOutlined, CloseCircleOutlined, ExclamationCircleOutlined,
 } from "@ant-design/icons";
-import { useI18n } from "../../i18n/LanguageContext.jsx";
+import { useI18n } from "../../i18n/useI18n.js";
 import * as api from "../../utils/api";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition.js";
 import { useAudioRecorder } from "../../hooks/useAudioRecorder.js";

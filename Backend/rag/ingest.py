@@ -5,14 +5,16 @@ import json
 import logging
 import os
 import re
+import uuid
 from pathlib import Path
 
 import numpy as np
+from .config import load_rag_config
 
 logger = logging.getLogger(__name__)
 
 KB_DIR = Path(__file__).resolve().parent.parent.parent / "knowledge_base"
-STORE_DIR = Path(__file__).resolve().parent.parent / "rag_store"
+STORE_DIR = load_rag_config().store_dir
 EMBED_CACHE_PATH = STORE_DIR / "embed_cache.json"
 CHUNK_SIZE = 600  # target characters per chunk
 CHUNK_OVERLAP = 100
@@ -96,7 +98,7 @@ async def _embed_texts(texts: list[str], client, model: str | None = None) -> li
     return results
 
 
-async def ingest_knowledge_base(client) -> dict:
+async def _ingest_knowledge_base_locked(client) -> dict:
     """
     Read all .md files from knowledge_base/, chunk, embed, and save to FAISS index.
     Returns metadata about ingested documents.
@@ -132,10 +134,46 @@ async def ingest_knowledge_base(client) -> dict:
     index = faiss.IndexFlatIP(dim)
     index.add(matrix)
 
-    # Save index and metadata
-    faiss.write_index(index, str(STORE_DIR / "kb.index"))
-    with open(STORE_DIR / "kb_meta.json", "w", encoding="utf-8") as f:
-        json.dump(chunk_meta, f, ensure_ascii=False, indent=2)
+    # Persist complete artifacts before publishing the new in-memory snapshot.
+    index_path = STORE_DIR / "kb.index"
+    meta_path = STORE_DIR / "kb_meta.json"
+    version_path = STORE_DIR / "kb.version"
+    index_temp = STORE_DIR / f"kb.index.{uuid.uuid4().hex}.tmp"
+    meta_temp = STORE_DIR / f"kb_meta.json.{uuid.uuid4().hex}.tmp"
+    version_temp = STORE_DIR / f"kb.version.{uuid.uuid4().hex}.tmp"
+    try:
+        faiss.write_index(index, str(index_temp))
+        with open(meta_temp, "w", encoding="utf-8") as file:
+            json.dump(chunk_meta, file, ensure_ascii=False, indent=2)
+        os.replace(index_temp, index_path)
+        os.replace(meta_temp, meta_path)
+        index_stat = index_path.stat()
+        meta_stat = meta_path.stat()
+        version_temp.write_text(
+            json.dumps({
+                "generation": uuid.uuid4().hex,
+                "index": [index_stat.st_mtime_ns, index_stat.st_size],
+                "metadata": [meta_stat.st_mtime_ns, meta_stat.st_size],
+            }),
+            encoding="utf-8",
+        )
+        os.replace(version_temp, version_path)
+    finally:
+        index_temp.unlink(missing_ok=True)
+        meta_temp.unlink(missing_ok=True)
+        version_temp.unlink(missing_ok=True)
+
+    import resources
+
+    await resources.faiss.publish_snapshot(index, chunk_meta)
 
     logger.info("FAISS index saved: dim=%d, vectors=%d", dim, index.ntotal)
     return {"documents": len(md_files), "chunks": len(all_chunks)}
+
+
+async def ingest_knowledge_base(client) -> dict:
+    """Run one same-host ingest writer or fail immediately on contention."""
+    from .ingest_lock import IngestFileLock
+
+    with IngestFileLock(STORE_DIR / "ingest.lock"):
+        return await _ingest_knowledge_base_locked(client)

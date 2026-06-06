@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import os
 import socket
@@ -20,15 +19,21 @@ from api.autopilot import router as autopilot_router
 from api.health    import router as health_router
 from api.settings  import router as settings_router
 from api.voice     import router as voice_router
+from rag.config import load_rag_config, validate_rag_config
 from resources.base import ResourceFailed
-import utils.warmup as _warmup
+import resources
+from utils.warmup.config import load_config
+from utils.warmup.runtime import create_runtime
 
 
 @asynccontextmanager
-async def _lifespan(_: FastAPI):
-    asyncio.create_task(_warmup.run_all())
+async def _lifespan(app: FastAPI):
+    validate_rag_config(load_rag_config())
+    runtime = create_runtime(resources.registry, load_config(), process_type="http")
+    app.state.warmup_runtime = runtime
+    runtime.start()
     yield
-    await _warmup.shutdown()
+    await runtime.shutdown()
 
 
 app = FastAPI(title="Voice Schedule Assistant", lifespan=_lifespan)

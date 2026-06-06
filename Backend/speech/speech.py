@@ -50,6 +50,26 @@ def transcribe_audio_bytes(audio_bytes: bytes, lang: str = "zh", suffix: str = "
       pass
 
 
+async def transcribe_audio_async(path: str, lang: str = "zh") -> str:
+  import resources as _res
+  from resources import require
+
+  await require(_res.whisper)
+  return await asyncio.to_thread(transcribe_audio, path, lang)
+
+
+async def transcribe_audio_bytes_async(
+  audio_bytes: bytes,
+  lang: str = "zh",
+  suffix: str = ".webm",
+) -> str:
+  import resources as _res
+  from resources import require
+
+  await require(_res.whisper)
+  return await asyncio.to_thread(transcribe_audio_bytes, audio_bytes, lang, suffix)
+
+
 async def transcribe_audio_base64(audio_b64: str, lang: str = "en") -> str:
   """Decode base64 audio, write to a temp file, and run Whisper STT."""
   import asyncio
@@ -60,7 +80,7 @@ async def transcribe_audio_base64(audio_b64: str, lang: str = "en") -> str:
     f.write(audio_bytes)
     tmp_path = f.name
   try:
-    return await asyncio.to_thread(transcribe_audio, tmp_path, lang)
+    return await transcribe_audio_async(tmp_path, lang)
   finally:
     try:
       os.remove(tmp_path)
@@ -167,4 +187,10 @@ def _synthesize_speech_sync(text: str, lang: str = "zh") -> bytes:
 
 
 async def synthesize_speech(text: str, lang: str = "zh") -> bytes:
+  import resources as _res
+  from resources import require
+
+  normalized = _normalize_lang(lang)
+  provider = _res.piper_zh if normalized == "zh" else _res.piper_en
+  await require(provider)
   return await asyncio.to_thread(_synthesize_speech_sync, text, lang)

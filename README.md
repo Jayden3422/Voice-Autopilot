@@ -133,7 +133,7 @@ On Autopilot, `Start Recording` only performs live transcription into the input 
 | Audit layer | Full lifecycle logging in `store/runs.py` | Observable and traceable |
 | Calendar automation | Playwright (browser) **or** Google Calendar API v3 — switchable in Settings UI | No OAuth setup needed for Playwright; API mode supports programmatic integration |
 | Settings UI | In-app page for connector on/off and credentials | No need to edit `.env` for connector changes; tokens stored in `settings.json` |
-| Startup warmup pool | Background pre-init: Whisper JIT, Piper ONNX (representative-length sentences), OpenAI HTTPS pool, FAISS index | Eliminates first-request latency; ONNX execution plan is primed for real segment sizes |
+| Startup warmup pool | Background pre-init: Whisper JIT, Piper ONNX, OpenAI client, FAISS index | Centralizes heavy resource initialization and prevents requests from racing resource startup |
 
 ### Project Structure
 
@@ -355,18 +355,73 @@ On startup the warmup pool runs in the background and pre-initializes all heavy 
 | Component | What is primed | Typical cost |
 |---|---|---|
 | `whisper_stt` | CTranslate2 JIT kernels (1 s silence inference) | ~2–5 s |
-| `piper_tts_zh` | ONNX execution plan + g2pW BERT model (~16-char sentence) | ~5–15 s |
-| `piper_tts_en` | ONNX execution plan (~16-char sentence) | ~1–3 s |
-| `openai_api` | httpx connection pool + both client singletons | ~0.5–1 s |
-| `rag_faiss` | FAISS index loaded into memory (skipped if not built) | ~1–3 s |
+| `piper_tts_zh` | ONNX execution plan + g2pW BERT model (short synthesis) | ~5–15 s |
+| `piper_tts_en` | ONNX execution plan (short synthesis) | ~1–3 s |
+| `openai` | Centralized AsyncOpenAI client initialization | <0.5 s |
+| `faiss` | FAISS index loaded into memory (fails as an optional capability if not built) | ~1–3 s |
 
 The server accepts requests immediately; a full log summary is printed when all tasks finish.
+Warmup coordination is centralized within each process. Every Uvicorn worker or
+MCP process loads and manages its own process-local model instances.
+FastAPI and MCP each own an explicit isolated warmup runtime. Each runtime
+publishes an atomic JSON status record under `Backend/.runtime/warmup` so the
+HTTP process can aggregate the state of all Voice-Autopilot processes on the
+same host. This aggregation is observational only and does not share models or
+coordinate loading across processes. A runtime heartbeat keeps live process
+records fresh; `WARMUP_STATE_HEARTBEAT_SECONDS` must be greater than zero and
+lower than `WARMUP_STATE_TTL_SECONDS`.
+
+Warmup numeric settings are strictly validated at startup:
+`WARMUP_MAX_CONCURRENT >= 1`, `WARMUP_TASK_TIMEOUT > 0`,
+`WARMUP_RETRIES >= 0`, and `WARMUP_RETRY_DELAY >= 0`. Invalid or non-finite
+values stop startup with a configuration error instead of silently falling
+back or leaving warmup stuck. `WARMUP_STATE_DIR` changes the local process-state
+directory, `WARMUP_STATE_TTL_SECONDS` controls stale-record cleanup, and
+`WARMUP_STATE_HEARTBEAT_SECONDS` controls live-record refresh.
+
+Use the operational endpoints to inspect or recover the current process:
+
+```bash
+curl http://localhost:8888/health
+curl http://localhost:8888/ready
+curl http://localhost:8888/warmup/status
+curl http://localhost:8888/warmup/cluster
+curl http://localhost:8888/metrics
+curl -X POST http://localhost:8888/warmup/retry
+```
+
+`/health` reports `pending`, `running`, `complete`, `failed`, `cancelled`, or
+`disabled`. The retry endpoint starts one background retry for failed resources
+only; it does not retry ready, skipped, cancelled, or pending resources.
+`/warmup/status` and `/metrics` describe the current HTTP process.
+`/warmup/cluster` aggregates valid status records from this host.
 
 Build the knowledge base index (required for RAG search, only needed once; re-run after updating `knowledge_base/*.md`):
 
 ```bash
-curl -X POST http://localhost:8888/ingest
+curl -X POST http://localhost:8888/autopilot/ingest
 ```
+
+Successful ingest atomically replaces the persisted FAISS artifacts and
+immediately hot-swaps the current process to the new complete snapshot. Other
+HTTP or MCP processes keep their process-local snapshots and lazily refresh on
+their next knowledge-base query.
+
+Ingest is single-writer per host. A non-blocking operating-system file lock
+covers document reads, embedding, artifact replacement, and snapshot
+publication. A concurrent `POST /autopilot/ingest` returns HTTP `409` with
+`ingest_in_progress` immediately instead of waiting or repeating embedding
+work. This lock does not coordinate different hosts or guarantee semantics on
+network filesystems.
+
+The supported RAG deployment contract is configured with
+`RAG_DEPLOYMENT_MODE=single-host` and `RAG_STORE_DIR=Backend/rag_store`.
+Ingest, retrieval, and FAISS warmup use this one local directory. HTTP and MCP
+startup fail when deployment mode is not `single-host`, or when the configured
+path is a clear UNC/network-storage URI. Mapped drives and network-backed POSIX
+mounts cannot be detected reliably; operators must ensure `RAG_STORE_DIR` is a
+local filesystem. Multi-host deployments require a unique ingest node plus
+artifact distribution or external distributed coordination.
 
 Open: `http://localhost:5173`
 
@@ -422,10 +477,10 @@ Add to `claude_desktop_config.json` (Windows: `%APPDATA%\Claude\claude_desktop_c
 mcp dev Backend/mcp/mcp_server.py
 
 # Automated test client (10 tests)
-python Backend/mcp/test_mcp_client.py
+python Backend/mcp/manual_mcp_client.py
 
 # Test a specific tool
-python Backend/mcp/test_mcp_client.py search_knowledge_base
+python Backend/mcp/manual_mcp_client.py search_knowledge_base
 ```
 
 Note: the HTTP server starts immediately; the startup warmup pool pre-initializes FAISS and other components in the background (~60s on first run). Subsequent tool calls are instant.
@@ -577,7 +632,7 @@ Recommended CI: `GitHub Actions` running both `pytest` and `npm test`.
 - Playwright is sensitive to network quality
 - Whisper `small` can be slow on CPU (consider `tiny` for speed)
 - Current implementation supports same-day events only
-- Piper TTS cold-start: ONNX Runtime caches execution plans per input shape; the warmup pool synthesizes representative-length sentences (matching `TTS_FIRST_SEGMENT_CHARS`) so the cached plan aligns with real requests — first real call is fast after warmup completes
+- Piper TTS cold-start: the warmup pool loads each configured Piper model and performs a short synthesis before requests use it
 - Piper Chinese TTS requires `torch` (CPU-only, ~125 MB), `g2pw`, `unicode_rbnf`, and `sentence_stream` (all in `requirements.txt` except `torch`). On Windows, start with `python -X utf8 main.py` to prevent a `cp1252` encoding error in `g2pw`.
 
 ---
@@ -648,7 +703,7 @@ Uses the official Google Calendar API instead of browser automation. Suitable wh
 - Audit logs: `Backend/store/db.py`, `Backend/store/runs.py`
 - Startup warmup pool: `Backend/utils/warmup/`
 - MCP Server: `Backend/mcp/mcp_server.py`
-- MCP test client: `Backend/mcp/test_mcp_client.py`
+- Manual MCP client: `Backend/mcp/manual_mcp_client.py`
 - Tests: `Backend/tests/`
 
 ---

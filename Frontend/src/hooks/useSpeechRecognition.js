@@ -1,5 +1,5 @@
 // Frontend/src/hooks/useSpeechRecognition.js
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 
 const getCtor = () => {
   if (typeof window === "undefined") return null;
@@ -12,9 +12,12 @@ export function useSpeechRecognition({ lang, onResult, onError }) {
   const activeRef = useRef(false);
   const finalTextRef = useRef("");
   const onResultRef = useRef(onResult);
-  onResultRef.current = onResult;
   const onErrorRef = useRef(onError);
-  onErrorRef.current = onError;
+
+  useEffect(() => {
+    onResultRef.current = onResult;
+    onErrorRef.current = onError;
+  }, [onError, onResult]);
 
   const stop = () => {
     activeRef.current = false;

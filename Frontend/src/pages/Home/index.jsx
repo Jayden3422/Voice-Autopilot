@@ -4,7 +4,7 @@ import { Button, Input, message as AntMessage } from "antd";
 import { SendOutlined } from "@ant-design/icons";
 import "./index.scss";
 import * as api from "../../utils/api";
-import { useI18n } from "../../i18n/LanguageContext.jsx";
+import { useI18n } from "../../i18n/useI18n.js";
 import { useSpeechRecognition } from "../../hooks/useSpeechRecognition.js";
 import { useAudioPlayback } from "../../hooks/useAudioPlayback.js";
 import { useAudioRecorder } from "../../hooks/useAudioRecorder.js";

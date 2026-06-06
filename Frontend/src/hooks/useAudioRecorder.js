@@ -1,5 +1,5 @@
 // Frontend/src/hooks/useAudioRecorder.js
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 
 export function useAudioRecorder({ onBlob }) {
   const [isRecording, setIsRecording] = useState(false);
@@ -7,7 +7,10 @@ export function useAudioRecorder({ onBlob }) {
   const streamRef = useRef(null);
   const shouldSendRef = useRef(true);
   const onBlobRef = useRef(onBlob);
-  onBlobRef.current = onBlob;
+
+  useEffect(() => {
+    onBlobRef.current = onBlob;
+  }, [onBlob]);
 
   const stopStream = () => {
     if (streamRef.current) {

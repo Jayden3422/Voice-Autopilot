@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Generic, TypeVar
@@ -35,6 +36,7 @@ class ResourceProvider(ABC, Generic[T]):
         self._status  = ResourceStatus.PENDING
         self._done    = asyncio.Event()
         self._error   = ""
+        self._closed  = False
 
     @abstractmethod
     async def _load(self) -> T: ...
@@ -70,6 +72,16 @@ class ResourceProvider(ABC, Generic[T]):
         self._status = ResourceStatus.CANCELLED
         self._done.set()
 
+    def reset(self) -> None:
+        """Reset a failed provider so the warmup pool can retry it."""
+        if self._status is not ResourceStatus.FAILED:
+            raise RuntimeError(f"Resource '{self.name}' cannot reset from {self._status}")
+        self._instance = None
+        self._status   = ResourceStatus.PENDING
+        self._error    = ""
+        self._done.clear()
+        self._closed   = False
+
     def get(self) -> T:
         if self._status is not ResourceStatus.READY:
             raise ResourceFailed(f"'{self.name}' not ready (status={self._status})")
@@ -80,6 +92,18 @@ class ResourceProvider(ABC, Generic[T]):
             await self._done.wait()
         else:
             await asyncio.wait_for(self._done.wait(), timeout=timeout)
+
+    async def close(self) -> None:
+        """Close the loaded resource instance when it exposes a close method."""
+        if self._closed or self._instance is None:
+            return
+        self._closed = True
+        close = getattr(self._instance, "close", None) or getattr(self._instance, "aclose", None)
+        if close is None:
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
     @property
     def is_ready(self) -> bool:

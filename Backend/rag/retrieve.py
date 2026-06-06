@@ -1,25 +1,20 @@
 """Retrieve relevant chunks from the FAISS knowledge base."""
 
 import hashlib
-import json
 import logging
 import os
-from pathlib import Path
 
 import numpy as np
+from .config import load_rag_config
 
 logger = logging.getLogger(__name__)
 
-STORE_DIR = Path(__file__).resolve().parent.parent / "rag_store"
+STORE_DIR = load_rag_config().store_dir
 _retrieval_cache: dict[str, list[dict]] = {}
-_faiss_index = None
-_faiss_meta: list[dict] | None = None
-_faiss_index_mtime: float | None = None
-_faiss_meta_mtime: float | None = None
 
 
-def _query_hash(query: str, top_k: int) -> str:
-    return hashlib.sha256(f"{query}::{top_k}".encode()).hexdigest()[:16]
+def _query_hash(query: str, top_k: int, version: object) -> str:
+    return hashlib.sha256(f"{query}::{top_k}::{version!r}".encode()).hexdigest()[:16]
 
 
 async def retrieve(
@@ -34,18 +29,18 @@ async def retrieve(
     Returns list of {doc, chunk, score, text}.
     """
     import faiss
+    import resources
+    from resources import require
 
-    cache_key = _query_hash(query, top_k)
+    snapshot = await require(resources.faiss)
+    refresh = getattr(resources.faiss, "refresh_if_changed", None)
+    if refresh is not None:
+        snapshot = await refresh()
+
+    cache_key = _query_hash(query, top_k, snapshot.version)
     if cache_key in _retrieval_cache:
         logger.info("Retrieval cache hit for query hash %s", cache_key)
         return _retrieval_cache[cache_key]
-
-    index_path = STORE_DIR / "kb.index"
-    meta_path = STORE_DIR / "kb_meta.json"
-
-    if not index_path.exists() or not meta_path.exists():
-        logger.warning("FAISS index not found at %s. Run ingest first.", STORE_DIR)
-        return []
 
     model = model or os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
@@ -54,25 +49,8 @@ async def retrieve(
     q_vec = np.array([resp.data[0].embedding], dtype="float32")
     faiss.normalize_L2(q_vec)
 
-    # Load index and metadata with caching
-    global _faiss_index, _faiss_meta, _faiss_index_mtime, _faiss_meta_mtime
-    index_mtime = index_path.stat().st_mtime
-    meta_mtime = meta_path.stat().st_mtime
-    if (
-        _faiss_index is None
-        or _faiss_meta is None
-        or _faiss_index_mtime != index_mtime
-        or _faiss_meta_mtime != meta_mtime
-    ):
-        _faiss_index = faiss.read_index(str(index_path))
-        with open(meta_path, "r", encoding="utf-8") as f:
-            _faiss_meta = json.load(f)
-        _faiss_index_mtime = index_mtime
-        _faiss_meta_mtime = meta_mtime
-        _retrieval_cache.clear()
-
-    index = _faiss_index
-    meta = _faiss_meta
+    index = snapshot.index
+    meta = snapshot.metadata
 
     actual_k = min(top_k, index.ntotal)
     if actual_k == 0:

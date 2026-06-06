@@ -1,67 +1,52 @@
-"""
-utils.warmup — startup warmup coordinator for Voice-Autopilot.
+"""Compatibility facade for the process-local warmup runtime."""
 
-Public API
-----------
-run_all()           : coroutine — run all enabled warmup tasks (idempotent)
-shutdown()          : coroutine — cancel warmup and mark remaining providers CANCELLED
-get_warmup_state()  : str — "pending" | "running" | "complete" | "disabled"
-"""
+from __future__ import annotations
 
-import logging
-import resources
 from .config import load_config
-from .pool   import WarmupPool, WarmupTask
+from .runtime import WarmupRuntime, create_runtime
 
-__all__ = ["run_all", "shutdown", "get_warmup_state"]
+__all__ = [
+    "WarmupRuntime",
+    "create_runtime",
+    "get_default_runtime",
+    "start",
+    "run_all",
+    "retry_failed",
+    "shutdown",
+    "get_warmup_state",
+]
 
-logger = logging.getLogger(__name__)
-
-_config = load_config()
-_pool   = WarmupPool(max_concurrent=_config.max_concurrent)
-
-# Map provider name → enabled flag from config
-_ENABLED: dict[str, bool] = {
-    "whisper_stt":  _config.whisper_enabled,
-    "piper_tts_zh": _config.piper_zh_enabled,
-    "piper_tts_en": _config.piper_en_enabled,
-    "openai":       _config.openai_enabled,
-    "faiss":        _config.faiss_enabled,
-}
+_default_runtime: WarmupRuntime | None = None
 
 
-def _setup() -> None:
-    if not _config.enabled:
-        for provider in resources.registry.all():
-            provider.mark_skipped()
-        return
+def get_default_runtime() -> WarmupRuntime:
+    global _default_runtime
+    if _default_runtime is None:
+        import resources
 
-    for provider in resources.registry.all():
-        if not _ENABLED.get(provider.name, True):
-            provider.mark_skipped()
-            logger.info("[warmup] %-20s SKIPPED       (disabled by config)", provider.name)
-            continue
-        _pool.register(WarmupTask(
-            provider    = provider,
-            required    = provider.required,
-            retries     = _config.retries if provider.required else 0,
-            retry_delay = _config.retry_delay,
-            timeout     = _config.task_timeout,
-        ))
+        _default_runtime = create_runtime(
+            resources.registry,
+            load_config(),
+            process_type="default",
+        )
+    return _default_runtime
 
 
-_setup()
+def start():
+    return get_default_runtime().start()
 
 
 async def run_all() -> None:
-    await _pool.run_all()
+    await get_default_runtime().run_all()
+
+
+async def retry_failed() -> bool:
+    return await get_default_runtime().retry_failed()
 
 
 async def shutdown() -> None:
-    await _pool.shutdown()
+    await get_default_runtime().shutdown()
 
 
 def get_warmup_state() -> str:
-    if not _config.enabled:
-        return "disabled"
-    return _pool.state
+    return get_default_runtime().state

@@ -12,7 +12,7 @@ class OpenAIProvider(ResourceProvider):
         if not api_key or api_key.startswith("sk-your"):
             raise RuntimeError("OPENAI_API_KEY not configured")
 
-        # Calling get_openai_client() triggers the lru_cache, creating the
+        # Calling create_openai_client() triggers the lru_cache, creating the
         # AsyncOpenAI singleton. No network call is made here.
-        from ai_client import get_openai_client
-        return get_openai_client()
+        from ai_client import create_openai_client
+        return create_openai_client()

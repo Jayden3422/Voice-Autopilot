@@ -16,7 +16,7 @@ import {
   Typography,
 } from "antd";
 import { CopyOutlined, LinkOutlined } from "@ant-design/icons";
-import { useI18n } from "../../i18n/LanguageContext.jsx";
+import { useI18n } from "../../i18n/useI18n.js";
 import { getAPI, postAPI, putAPI } from "../../utils/api";
 import "./index.scss";
 
@@ -89,7 +89,7 @@ export default function Settings() {
         form.setFieldsValue(flattenSettings(data));
         setCalendarMode(data?.calendar?.mode ?? "playwright");
         await refreshGcStatus();
-      } catch (e) {
+      } catch {
         message.error(s("saveError"));
       }
     })();
@@ -178,7 +178,9 @@ export default function Settings() {
     try {
       const vals = form.getFieldsValue();
       await saveSettings(unflattenValues(vals));
-    } catch (_) {}
+    } catch {
+      // Saving credentials is best-effort; the auth URL request reports actionable errors.
+    }
 
     setGcConnecting(true);
     try {
@@ -198,7 +200,7 @@ export default function Settings() {
       await disconnectGoogle();
       message.success(s("googleNotConnected"));
       await refreshGcStatus();
-    } catch (e) {
+    } catch {
       // interceptor already showed the HTTP error toast
     } finally {
       setGcDisconnecting(false);

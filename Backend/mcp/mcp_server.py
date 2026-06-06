@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Ensure Backend is on sys.path so existing bare imports work
-BACKEND_DIR = Path(__file__).resolve().parent
+BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
 from dotenv import load_dotenv
@@ -52,7 +52,7 @@ async def analyze_transcript(transcript: str, model: str | None = None) -> str:
         transcript: The meeting/conversation transcript text to analyze
         model: Optional OpenAI model override (defaults to env OPENAI_MODEL)
     """
-    client = get_openai_client()
+    client = await get_openai_client()
     result = await extract_autopilot_json(transcript, client=client, model=model)
     return json.dumps(result, ensure_ascii=False, indent=2)
 
@@ -68,7 +68,7 @@ async def search_knowledge_base(query: str, top_k: int = 5) -> str:
         query: The search query text
         top_k: Number of results to return (default 5, max 20)
     """
-    client = get_openai_client()
+    client = await get_openai_client()
     top_k = min(max(top_k, 1), 20)
     try:
         results = await asyncio.wait_for(retrieve(query, client, top_k=top_k), timeout=30)
@@ -178,7 +178,7 @@ async def draft_reply(
         extracted_json: JSON string output from analyze_transcript
         evidence_json: JSON string of evidence chunks from search_knowledge_base (default: empty list)
     """
-    client = get_openai_client()
+    client = await get_openai_client()
     extracted = json.loads(extracted_json)
     evidence = json.loads(evidence_json)
     result = await generate_reply_draft(client, transcript, extracted, evidence)
@@ -225,12 +225,17 @@ def get_knowledge_base_listing() -> str:
 
 # ────────────────────────── Entry point ──────────────────────────
 
+def _run() -> None:
+    import resources
+    from rag.config import load_rag_config, validate_rag_config
+    from utils.warmup.config import load_config
+    from utils.warmup.mcp_lifecycle import run_mcp_lifecycle
+    from utils.warmup.runtime import create_runtime
+
+    validate_rag_config(load_rag_config())
+    runtime = create_runtime(resources.registry, load_config(), process_type="mcp")
+    asyncio.run(run_mcp_lifecycle(runtime, mcp.run_stdio_async))
+
 
 if __name__ == "__main__":
-    import asyncio
-    import utils.warmup as _warmup
-    # Warmup completes in its own event loop before MCP starts.
-    # All _done events are set; asyncio.Event.wait() returns immediately
-    # in the MCP event loop because _done._value is already True.
-    asyncio.run(_warmup.run_all())
-    mcp.run(transport="stdio")
+    _run()

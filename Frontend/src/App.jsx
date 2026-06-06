@@ -1,7 +1,7 @@
 import { Routes, Route, Link, useLocation } from "react-router-dom";
 import routes from "./router/routes";
 import { Button, Menu } from "antd";
-import { useI18n } from "./i18n/LanguageContext.jsx";
+import { useI18n } from "./i18n/useI18n.js";
 
 const App = () => {
   const location = useLocation();

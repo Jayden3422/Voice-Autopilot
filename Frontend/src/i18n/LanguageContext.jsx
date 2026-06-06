@@ -1,10 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import "dayjs/locale/en";
 import { translations } from "./translations";
-
-const LanguageContext = createContext(null);
+import { LanguageContext } from "./languageContext.js";
 
 const normalizeLang = (value) => (value === "en" ? "en" : "zh");
 
@@ -58,12 +57,4 @@ export const LanguageProvider = ({ children }) => {
       {children}
     </LanguageContext.Provider>
   );
-};
-
-export const useI18n = () => {
-  const ctx = useContext(LanguageContext);
-  if (!ctx) {
-    throw new Error("useI18n must be used within LanguageProvider");
-  }
-  return ctx;
 };

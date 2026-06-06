@@ -24,6 +24,7 @@ from extraction.calendar_extractor import extract_calendar_event
 from extraction.reply_drafter import generate_reply_draft
 from connectors.email_connector import build_email_content
 from rag.retrieve import retrieve
+from resources.base import ResourceFailed
 from store.runs import create_run, update_run, get_run, list_runs
 from api.models import AutopilotRunRequest, AutopilotConfirmRequest, AutopilotAdjustRequest
 from speech.speech import transcribe_audio_base64
@@ -115,7 +116,7 @@ async def autopilot_run(
             "actions_preview": actions_preview,
         }
 
-    except HTTPException:
+    except (HTTPException, ResourceFailed):
         raise
     except ValueError as e:
         update_run(run_id, status="error", error=str(e)[:1000])
@@ -299,7 +300,15 @@ async def autopilot_ingest(
 ):
     """Re-ingest the knowledge base into the FAISS index."""
     from rag.ingest import ingest_knowledge_base
-    result = await ingest_knowledge_base(client)
+    from rag.ingest_lock import IngestInProgress
+
+    try:
+        result = await ingest_knowledge_base(client)
+    except IngestInProgress as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "ingest_in_progress"},
+        ) from exc
     return {"status": "ok", **result}
 
 

@@ -18,13 +18,14 @@ from speech.speech import (
     delta_from_previous,
     segment_tts_text,
     synthesize_speech,
-    transcribe_audio,
-    transcribe_audio_bytes,
+    transcribe_audio_async,
+    transcribe_audio_bytes_async,
 )
 from extraction.calendar_extractor import extract_calendar_event
 from connectors.calendar_agent import GoogleCalendarAgent
 from actions.models import CalendarCommand
 from api.models import VoiceResponse
+from resources.base import ResourceFailed
 from store.runs import create_run, update_run, get_run
 from utils.file_utils import save_temp_file
 from utils.lang import normalize_lang as _normalize_lang
@@ -282,9 +283,7 @@ async def _schedule_partial_stt(state: dict) -> None:
     snapshot = bytes(state["audio_buffer"])
     lang = state["lang"]
     state["last_stt_ts_ms"] = now_ms
-    state["stt_task"] = asyncio.create_task(
-        asyncio.to_thread(transcribe_audio_bytes, snapshot, lang)
-    )
+    state["stt_task"] = asyncio.create_task(transcribe_audio_bytes_async(snapshot, lang))
 
 
 async def _emit_partial_if_ready(websocket: WebSocket, state: dict) -> None:
@@ -431,8 +430,7 @@ async def _finalize_stream(
     final_text = ""
     if state["audio_buffer"]:
         try:
-            final_text = await asyncio.to_thread(
-                transcribe_audio_bytes,
+            final_text = await transcribe_audio_bytes_async(
                 bytes(state["audio_buffer"]),
                 state["lang"],
             )
@@ -500,6 +498,8 @@ async def tts(request: TTSRequest):
         raise HTTPException(status_code=400, detail=_msg(normalized_lang, "tts_text_required", HTTP_MESSAGES))
     try:
         audio_bytes = await synthesize_speech(text, lang=normalized_lang)
+    except ResourceFailed:
+        raise
     except Exception as e:
         logger.exception("%s: %s", _msg(normalized_lang, "tts_failed", LOG_MESSAGES), e)
         raise HTTPException(status_code=500, detail=_msg(normalized_lang, "tts_failed", HTTP_MESSAGES))
@@ -527,10 +527,10 @@ async def handle_voice(
     temp_path = save_temp_file(audio)
 
     try:
-        user_text = transcribe_audio(temp_path, lang=normalized_lang)
+        user_text = await transcribe_audio_async(temp_path, lang=normalized_lang)
         return await _process_calendar_text(user_text, normalized_lang, session_id, bool(include_audio), client=client, input_type="audio")
 
-    except HTTPException:
+    except (HTTPException, ResourceFailed):
         raise
     except Exception as e:
         logger.exception("%s: %s", _msg(normalized_lang, "voice_error", LOG_MESSAGES), e)

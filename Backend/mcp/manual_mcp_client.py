@@ -1,9 +1,9 @@
 """Standalone test client for the Voice-Autopilot MCP Server.
 
 Usage:
-    python Backend/test_mcp_client.py              # run all tests
-    python Backend/test_mcp_client.py list_tools    # just list tools
-    python Backend/test_mcp_client.py <tool_name>   # test a specific tool
+    python Backend/mcp/manual_mcp_client.py              # run all checks
+    python Backend/mcp/manual_mcp_client.py list_tools   # just list tools
+    python Backend/mcp/manual_mcp_client.py <tool_name>  # check a specific tool
 """
 
 import asyncio

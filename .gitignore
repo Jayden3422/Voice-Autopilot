@@ -29,6 +29,7 @@ chrome-win
 chrome_profile
 rag_store
 Backend/models/piper
+Backend/.runtime/
 g2pW
 
 # Private

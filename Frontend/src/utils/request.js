@@ -3,7 +3,7 @@ import axios from "axios";
 import { message as AntMessage } from "antd";
 import { translations } from "../i18n/translations.js";
 
-const baseURL = process.env.NODE_ENV === "development" ? "/api" : "";
+const baseURL = import.meta.env.DEV ? "/api" : "";
 
 const getLang = () => {
   try {

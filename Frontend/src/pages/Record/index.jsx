@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import {
   Table,
   Button,
@@ -14,7 +14,7 @@ import {
   Tooltip,
 } from "antd";
 import { EyeOutlined, RedoOutlined } from "@ant-design/icons";
-import { useI18n } from "../../i18n/LanguageContext.jsx";
+import { useI18n } from "../../i18n/useI18n.js";
 import * as api from "../../utils/api";
 import "./index.scss";
 
@@ -33,14 +33,10 @@ const Record = () => {
   const [runTypeFilter, setRunTypeFilter] = useState("all");
   const limit = 20;
 
-  useEffect(() => {
-    loadRecords(true);
-  }, [runTypeFilter]);
-
-  const loadRecords = async (reset = false) => {
+  const loadRecords = useCallback(async (reset = false, requestedOffset = 0) => {
     setLoading(true);
     try {
-      const currentOffset = reset ? 0 : offset;
+      const currentOffset = reset ? 0 : requestedOffset;
       const params = {
         limit,
         offset: currentOffset,
@@ -56,7 +52,7 @@ const Record = () => {
         setRecords(newRecords);
         setOffset(limit);
       } else {
-        setRecords([...records, ...newRecords]);
+        setRecords((currentRecords) => [...currentRecords, ...newRecords]);
         setOffset(currentOffset + limit);
       }
 
@@ -67,7 +63,11 @@ const Record = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [runTypeFilter]);
+
+  useEffect(() => {
+    loadRecords(true);
+  }, [loadRecords]);
 
   const viewDetails = async (runId) => {
     setDrawerVisible(true);
@@ -88,8 +88,7 @@ const Record = () => {
   const handleRetry = async (runId) => {
     setRetrying(true);
     try {
-      const res = await api.postAPI(`/autopilot/retry/${runId}`);
-      const data = res?.data || res || {};
+      await api.postAPI(`/autopilot/retry/${runId}`);
 
       AntMessage.success(t("record.retrySuccess"));
 
@@ -266,7 +265,7 @@ const Record = () => {
 
       {hasMore && records.length > 0 && (
         <div style={{ textAlign: "center", marginTop: "16px" }}>
-          <Button onClick={() => loadRecords(false)} loading={loading}>
+          <Button onClick={() => loadRecords(false, offset)} loading={loading}>
             {t("record.loadMore")}
           </Button>
         </div>

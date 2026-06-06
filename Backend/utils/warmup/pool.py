@@ -14,6 +14,7 @@ import logging
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Any, Callable
 
 from resources.base import ResourceProvider, ResourceStatus, _TERMINAL_STATUSES
 
@@ -37,23 +38,65 @@ class WarmupPool:
     asyncio.shield(), so a cancelled caller does not cancel the shared execution.
     """
 
-    def __init__(self, max_concurrent: int = 2) -> None:
+    def __init__(
+        self,
+        max_concurrent: int = 2,
+        observer: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> None:
         self._tasks:    list[WarmupTask]    = []
         self._max_concurrent                = max_concurrent
         self._lock:     asyncio.Lock        = asyncio.Lock()
         self._run_task: asyncio.Task | None = None
+        self._observer = observer
+
+    def _emit(self, event: str, **data: Any) -> None:
+        if self._observer is not None:
+            self._observer(event, data)
 
     def register(self, task: WarmupTask) -> None:
+        if self._run_task is not None:
+            raise ValueError("warmup pool has already started")
+        if any(existing.provider.name == task.provider.name for existing in self._tasks):
+            raise ValueError(f"warmup provider '{task.provider.name}' is already registered")
         self._tasks.append(task)
+
+    def start(self) -> asyncio.Task:
+        """Start warmup immediately and return the shared execution task."""
+        if self._run_task is None:
+            self._run_task = asyncio.create_task(self._execute_all())
+        return self._run_task
 
     async def run_all(self) -> None:
         async with self._lock:
-            if self._run_task is None:
-                self._run_task = asyncio.create_task(self._execute_all())
-        await asyncio.shield(self._run_task)
+            run_task = self.start()
+        await asyncio.shield(run_task)
 
-    async def _execute_all(self) -> None:
-        if not self._tasks:
+    async def retry_failed(self) -> bool:
+        """Start one shared retry execution containing only failed providers."""
+        async with self._lock:
+            if self._run_task is not None and not self._run_task.done():
+                return False
+            failed = [
+                task for task in self._tasks
+                if task.provider._status is ResourceStatus.FAILED
+            ]
+            if not failed:
+                return False
+            for task in failed:
+                task.provider.reset()
+            self._run_task = asyncio.create_task(self._execute_all(failed, retry=True))
+            return True
+
+    async def _execute_all(
+        self,
+        tasks: list[WarmupTask] | None = None,
+        *,
+        retry: bool = False,
+    ) -> None:
+        tasks = self._tasks if tasks is None else tasks
+        self._emit("execution_started", retry=retry)
+        if not tasks:
+            self._emit("execution_completed", elapsed_ms=0.0, state=self.state)
             return
 
         sem = asyncio.Semaphore(self._max_concurrent)
@@ -66,8 +109,13 @@ class WarmupPool:
 
             async with sem:
                 for attempt in range(1, total + 1):
+                    self._emit(
+                        "attempt_started",
+                        resource=wtask.provider.name,
+                        attempt=attempt,
+                    )
                     logger.info(
-                        "[warmup] %-20s INITIALIZING  attempt=%d/%d",
+                        "event=warmup_resource_initializing resource=%s attempt=%d total_attempts=%d",
                         wtask.provider.name, attempt, total,
                     )
                     try:
@@ -76,8 +124,13 @@ class WarmupPool:
                             timeout=wtask.timeout,
                         )
                         wtask.provider.mark_ready(instance)
+                        self._emit(
+                            "resource_ready",
+                            resource=wtask.provider.name,
+                            elapsed_ms=(time.monotonic() - t_task) * 1000,
+                        )
                         logger.info(
-                            "[warmup] %-20s READY         elapsed=%.0fms",
+                            "event=warmup_resource_ready resource=%s elapsed_ms=%.0f",
                             wtask.provider.name,
                             (time.monotonic() - t_task) * 1000,
                         )
@@ -85,26 +138,32 @@ class WarmupPool:
                     except Exception as exc:
                         error = str(exc)
                         logger.warning(
-                            "[warmup] %-20s FAILED        attempt=%d/%d  error=%r",
+                            "event=warmup_resource_attempt_failed resource=%s attempt=%d total_attempts=%d error=%r",
                             wtask.provider.name, attempt, total, error,
                         )
                         if attempt < total:
                             await asyncio.sleep(wtask.retry_delay)
 
                 wtask.provider.mark_failed(error or "unknown error")
+                self._emit(
+                    "resource_failed",
+                    resource=wtask.provider.name,
+                    elapsed_ms=(time.monotonic() - t_task) * 1000,
+                )
 
-        await asyncio.gather(*[_run_one(t) for t in self._tasks])
+        await asyncio.gather(*[_run_one(t) for t in tasks])
 
         wall_ms  = (time.monotonic() - t0) * 1000
-        statuses = [t.provider._status for t in self._tasks]
+        statuses = [t.provider._status for t in tasks]
         logger.info(
-            "[warmup] complete  wall=%.0fms  ok=%d skipped=%d failed=%d cancelled=%d",
+            "event=warmup_execution_complete elapsed_ms=%.0f ready=%d skipped=%d failed=%d cancelled=%d",
             wall_ms,
             sum(1 for s in statuses if s is ResourceStatus.READY),
             sum(1 for s in statuses if s is ResourceStatus.SKIPPED),
             sum(1 for s in statuses if s is ResourceStatus.FAILED),
             sum(1 for s in statuses if s is ResourceStatus.CANCELLED),
         )
+        self._emit("execution_completed", elapsed_ms=wall_ms, state=self.state)
 
     async def shutdown(self) -> None:
         """Cancel in-progress warmup; mark non-terminal providers CANCELLED."""
@@ -115,6 +174,14 @@ class WarmupPool:
         for wtask in self._tasks:
             if wtask.provider._status not in _TERMINAL_STATUSES:
                 wtask.provider.mark_cancelled()
+        for wtask in self._tasks:
+            try:
+                await wtask.provider.close()
+            except Exception:
+                logger.exception(
+                    "event=warmup_resource_close_failed resource=%s",
+                    wtask.provider.name,
+                )
 
     @property
     def state(self) -> str:
@@ -122,6 +189,12 @@ class WarmupPool:
             return "pending"
         if not self._run_task.done():
             return "running"
+        if self._run_task.cancelled():
+            return "cancelled"
+        if self._run_task.exception() is not None:
+            return "failed"
+        if any(t.provider._status is ResourceStatus.FAILED for t in self._tasks):
+            return "failed"
         return "complete"
 
     @property
