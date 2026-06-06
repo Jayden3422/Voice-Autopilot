@@ -380,3 +380,66 @@ async def test_pool_state_transitions():
     assert pool.state == "running"
     await run
     assert pool.state == "complete"
+
+
+# ── Health endpoints ───────────────────────────────────────────────────────────
+
+def _make_test_app(reg: ResourceRegistry):
+    # Local import: api/health.py does not exist until Task 13
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.health import router as health_router, get_registry as _get_registry
+
+    app = FastAPI()
+    app.include_router(health_router)
+    app.dependency_overrides[_get_registry] = lambda: reg
+    return TestClient(app)
+
+
+def test_health_endpoint_always_200():
+    client = _make_test_app(ResourceRegistry())
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+    assert "warmup" in r.json()
+
+
+def test_ready_503_when_required_provider_pending():
+    reg = ResourceRegistry()
+    reg.register(FakeProvider("whisper_stt", required=True))
+    client = _make_test_app(reg)
+    r = client.get("/ready")
+    assert r.status_code == 503
+    assert r.json()["ready"] is False
+    assert r.json()["resources"]["whisper_stt"] == "pending"
+
+
+def test_ready_200_when_all_required_ready():
+    p = FakeProvider("whisper_stt", required=True)
+    p.mark_ready(object())
+    reg = ResourceRegistry()
+    reg.register(p)
+    client = _make_test_app(reg)
+    r = client.get("/ready")
+    assert r.status_code == 200
+    assert r.json()["ready"] is True
+    assert r.json()["resources"]["whisper_stt"] == "ready"
+
+
+def test_ready_503_when_required_provider_failed():
+    p = FakeProvider("whisper_stt", required=True)
+    p.mark_failed("model not found")
+    reg = ResourceRegistry()
+    reg.register(p)
+    client = _make_test_app(reg)
+    r = client.get("/ready")
+    assert r.status_code == 503
+    assert r.json()["resources"]["whisper_stt"] == "failed"
+
+
+def test_ready_200_no_required_providers():
+    reg = ResourceRegistry()
+    client = _make_test_app(reg)
+    r = client.get("/ready")
+    assert r.status_code == 200
+    assert r.json()["ready"] is True
