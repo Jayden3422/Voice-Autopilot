@@ -173,3 +173,31 @@ def test_registry_status_snapshot():
     reg.register(p)
     snap = reg.status_snapshot()
     assert snap == {"x": "skipped"}
+
+
+# ── WarmupConfig ───────────────────────────────────────────────────────────────
+
+import os
+from utils.warmup.config import WarmupConfig, load_config
+
+
+def test_config_defaults():
+    cfg = load_config()
+    assert cfg.enabled is True
+    assert cfg.max_concurrent == 2
+    assert cfg.task_timeout == 60.0
+    assert cfg.retries == 2
+    assert cfg.retry_delay == 1.0
+    assert cfg.whisper_enabled is True
+
+
+def test_config_env_override(monkeypatch):
+    monkeypatch.setenv("WARMUP_ENABLED", "false")
+    monkeypatch.setenv("WARMUP_MAX_CONCURRENT", "4")
+    monkeypatch.setenv("WARMUP_RETRIES", "0")
+    monkeypatch.setenv("WARMUP_WHISPER_ENABLED", "0")
+    cfg = load_config()
+    assert cfg.enabled is False
+    assert cfg.max_concurrent == 4
+    assert cfg.retries == 0
+    assert cfg.whisper_enabled is False
