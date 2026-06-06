@@ -76,8 +76,7 @@ async def test_mark_cancelled_sets_status_and_done():
     assert p._done.is_set()
 
 
-@pytest.mark.asyncio
-async def test_get_raises_if_not_ready():
+def test_get_raises_if_not_ready():
     p = FakeProvider("x")
     with pytest.raises(ResourceFailed):
         p.get()

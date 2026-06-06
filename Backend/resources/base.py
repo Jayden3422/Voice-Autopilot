@@ -45,20 +45,28 @@ class ResourceProvider(ABC, Generic[T]):
         return await self._load()
 
     def mark_ready(self, instance: T) -> None:
+        if self._done.is_set():
+            return
         self._instance = instance
         self._status   = ResourceStatus.READY
         self._done.set()
 
     def mark_failed(self, error: str) -> None:
+        if self._done.is_set():
+            return
         self._error  = error
         self._status = ResourceStatus.FAILED
         self._done.set()
 
     def mark_skipped(self) -> None:
+        if self._done.is_set():
+            return
         self._status = ResourceStatus.SKIPPED
         self._done.set()
 
     def mark_cancelled(self) -> None:
+        if self._done.is_set():
+            return
         self._status = ResourceStatus.CANCELLED
         self._done.set()
 
