@@ -13,6 +13,7 @@ from resources.base import (
     require,
 )
 from resources.registry import ResourceRegistry
+from utils.warmup.pool import WarmupPool, WarmupTask
 
 
 # ── Shared fake ────────────────────────────────────────────────────────────────
@@ -201,3 +202,181 @@ def test_config_env_override(monkeypatch):
     assert cfg.max_concurrent == 4
     assert cfg.retries == 0
     assert cfg.whisper_enabled is False
+
+
+# ── WarmupPool helpers ─────────────────────────────────────────────────────────
+
+def make_pool(tasks: list[WarmupTask], max_concurrent: int = 8) -> WarmupPool:
+    pool = WarmupPool(max_concurrent=max_concurrent)
+    for t in tasks:
+        pool.register(t)
+    return pool
+
+
+# ── WarmupPool tests ───────────────────────────────────────────────────────────
+
+def test_register_task():
+    p = FakeProvider("a")
+    pool = WarmupPool(max_concurrent=2)
+    task = WarmupTask(provider=p)
+    pool.register(task)
+    assert len(pool._tasks) == 1
+    assert pool._tasks[0].provider is p
+
+
+@pytest.mark.asyncio
+async def test_run_all_success():
+    p = FakeProvider("a")
+    pool = make_pool([WarmupTask(provider=p)])
+    await pool.run_all()
+    assert p.is_ready
+
+
+@pytest.mark.asyncio
+async def test_run_all_twice_tasks_run_once():
+    p = FakeProvider("a")
+    pool = make_pool([WarmupTask(provider=p)])
+    await pool.run_all()
+    await pool.run_all()
+    assert p.load_calls == 1
+    assert p.is_ready
+
+
+@pytest.mark.asyncio
+async def test_concurrent_run_all_tasks_run_once():
+    p = FakeProvider("a")
+    pool = make_pool([WarmupTask(provider=p)])
+    await asyncio.gather(pool.run_all(), pool.run_all(), pool.run_all())
+    assert p.load_calls == 1
+    assert p.is_ready
+
+
+@pytest.mark.asyncio
+async def test_cancelled_caller_does_not_cancel_pool():
+    completed = False
+
+    async def slow():
+        nonlocal completed
+        await asyncio.sleep(0.15)
+        completed = True
+        return object()
+
+    p   = FakeProvider("slow", load_fn=slow)
+    pool = make_pool([WarmupTask(provider=p)])
+
+    t1 = asyncio.create_task(pool.run_all())
+    t2 = asyncio.create_task(pool.run_all())
+    await asyncio.sleep(0.02)
+    t1.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t1
+    await t2
+    assert completed
+    assert p.is_ready
+
+
+@pytest.mark.asyncio
+async def test_semaphore_limit():
+    running = 0
+    max_running = 0
+
+    async def counting():
+        nonlocal running, max_running
+        running += 1
+        max_running = max(max_running, running)
+        await asyncio.sleep(0.02)
+        running -= 1
+        return object()
+
+    providers = [FakeProvider(f"p{i}", load_fn=counting) for i in range(6)]
+    tasks = [WarmupTask(provider=p) for p in providers]
+    pool = make_pool(tasks, max_concurrent=2)
+    await pool.run_all()
+    assert max_running <= 2
+    assert all(p.is_ready for p in providers)
+
+
+@pytest.mark.asyncio
+async def test_optional_task_failure_others_complete():
+    bad  = FakeProvider("bad",  fail=True)
+    good = FakeProvider("good")
+    pool = make_pool([WarmupTask(provider=bad), WarmupTask(provider=good)])
+    await pool.run_all()
+    assert bad._status  is ResourceStatus.FAILED
+    assert good.is_ready
+
+
+@pytest.mark.asyncio
+async def test_required_task_retries_on_failure():
+    calls = 0
+
+    async def flaky():
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise RuntimeError(f"fail {calls}")
+        return object()
+
+    p    = FakeProvider("flaky", required=True, load_fn=flaky)
+    pool = make_pool([WarmupTask(provider=p, required=True, retries=2, retry_delay=0.01)])
+    await pool.run_all()
+    assert calls == 3
+    assert p.is_ready
+
+
+@pytest.mark.asyncio
+async def test_required_task_exhausted_marks_failed():
+    p    = FakeProvider("bad", required=True, fail=True)
+    pool = make_pool([WarmupTask(provider=p, required=True, retries=2, retry_delay=0.01)])
+    await pool.run_all()
+    assert p._status is ResourceStatus.FAILED
+    assert "deliberate failure" in p._error
+    assert p._done.is_set()
+
+
+@pytest.mark.asyncio
+async def test_task_timeout_marks_failed():
+    p    = FakeProvider("slow", delay=10.0)
+    pool = make_pool([WarmupTask(provider=p, timeout=0.05)])
+    await pool.run_all()
+    assert p._status is ResourceStatus.FAILED
+    assert p._done.is_set()
+
+
+@pytest.mark.asyncio
+async def test_wall_clock_accuracy():
+    p    = FakeProvider("slow", delay=0.1)
+    pool = make_pool([WarmupTask(provider=p)])
+    t0   = asyncio.get_event_loop().time()
+    await pool.run_all()
+    assert (asyncio.get_event_loop().time() - t0) >= 0.1
+
+
+@pytest.mark.asyncio
+async def test_shutdown_marks_running_provider_cancelled():
+    slow = FakeProvider("slow", delay=5.0)
+    pool = make_pool([WarmupTask(provider=slow)])
+
+    run = asyncio.create_task(pool.run_all())
+    await asyncio.sleep(0.02)
+    await pool.shutdown()
+
+    try:
+        await run
+    except (asyncio.CancelledError, Exception):
+        pass
+
+    assert slow._status is ResourceStatus.CANCELLED
+    assert slow._done.is_set()
+
+
+@pytest.mark.asyncio
+async def test_pool_state_transitions():
+    p    = FakeProvider("a", delay=0.05)
+    pool = make_pool([WarmupTask(provider=p)])
+    assert pool.state == "pending"
+    run = asyncio.create_task(pool.run_all())
+    await asyncio.sleep(0.01)
+    assert pool.state == "running"
+    await run
+    assert pool.state == "complete"
