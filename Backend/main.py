@@ -13,22 +13,37 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
 from api.autopilot import router as autopilot_router
-from api.settings import router as settings_router
-from api.voice import router as voice_router
-from utils.warmup import run_all as _warmup_run_all
+from api.health    import router as health_router
+from api.settings  import router as settings_router
+from api.voice     import router as voice_router
+from resources.base import ResourceFailed
+import utils.warmup as _warmup
 
 
 @asynccontextmanager
 async def _lifespan(_: FastAPI):
-    asyncio.create_task(_warmup_run_all())
+    asyncio.create_task(_warmup.run_all())
     yield
+    await _warmup.shutdown()
 
 
 app = FastAPI(title="Voice Schedule Assistant", lifespan=_lifespan)
 app.include_router(autopilot_router)
+app.include_router(health_router)
 app.include_router(settings_router)
 app.include_router(voice_router)
+
+@app.exception_handler(ResourceFailed)
+async def _resource_failed_handler(request: Request, exc: ResourceFailed):
+    return JSONResponse(
+        status_code=503,
+        content={"error": "service_unavailable", "detail": str(exc)},
+    )
+
 logger = logging.getLogger(__name__)
 
 app.add_middleware(
