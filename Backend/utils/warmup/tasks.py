@@ -10,7 +10,8 @@ Each function is an async callable that:
 import asyncio
 import logging
 
-from .pool import _SkipWarmup
+class _SkipWarmup(Exception):
+    """Raise inside a warmup task to mark it as skipped (not a failure)."""
 
 logger = logging.getLogger(__name__)
 
