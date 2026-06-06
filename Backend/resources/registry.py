@@ -1,0 +1,2 @@
+class ResourceRegistry:
+    pass
