@@ -131,3 +131,45 @@ async def test_terminal_statuses_set():
     assert ResourceStatus.CANCELLED in _TERMINAL_STATUSES
     assert ResourceStatus.PENDING       not in _TERMINAL_STATUSES
     assert ResourceStatus.INITIALIZING  not in _TERMINAL_STATUSES
+
+
+# ── ResourceRegistry ───────────────────────────────────────────────────────────
+
+def test_registry_register_and_all():
+    reg = ResourceRegistry()
+    p1 = FakeProvider("a")
+    p2 = FakeProvider("b", required=True)
+    reg.register(p1)
+    reg.register(p2)
+    assert set(p.name for p in reg.all()) == {"a", "b"}
+
+
+def test_registry_required_filters_required_only():
+    reg = ResourceRegistry()
+    reg.register(FakeProvider("opt", required=False))
+    req = FakeProvider("req", required=True)
+    reg.register(req)
+    assert reg.required() == [req]
+
+
+def test_registry_all_required_ready_true():
+    reg = ResourceRegistry()
+    p = FakeProvider("r", required=True)
+    p.mark_ready(object())
+    reg.register(p)
+    assert reg.all_required_ready()
+
+
+def test_registry_all_required_ready_false_when_pending():
+    reg = ResourceRegistry()
+    reg.register(FakeProvider("r", required=True))
+    assert not reg.all_required_ready()
+
+
+def test_registry_status_snapshot():
+    reg = ResourceRegistry()
+    p = FakeProvider("x")
+    p.mark_skipped()
+    reg.register(p)
+    snap = reg.status_snapshot()
+    assert snap == {"x": "skipped"}
