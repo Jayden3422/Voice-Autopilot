@@ -15,8 +15,6 @@ from dotenv import load_dotenv
 load_dotenv(BACKEND_DIR.parent / ".env")
 
 # ── Eager imports: pay the cost once at startup, not during tool calls ──
-# faiss takes ~45s to load on first import; do it here before the event loop starts
-import faiss  # noqa: F401  (pre-warm so rag.retrieve doesn't block the event loop)
 from actions.dispatcher import execute_action
 from ai_client import get_openai_client
 from extraction.autopilot_extractor import extract_autopilot_json
@@ -229,4 +227,10 @@ def get_knowledge_base_listing() -> str:
 
 
 if __name__ == "__main__":
+    import asyncio
+    import utils.warmup as _warmup
+    # Warmup completes in its own event loop before MCP starts.
+    # All _done events are set; asyncio.Event.wait() returns immediately
+    # in the MCP event loop because _done._value is already True.
+    asyncio.run(_warmup.run_all())
     mcp.run(transport="stdio")
