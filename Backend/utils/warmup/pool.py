@@ -136,7 +136,11 @@ class WarmupPool:
                         )
                         return
                     except Exception as exc:
-                        error = str(exc)
+                        error = (
+                            f"timed out after {wtask.timeout}s"
+                            if isinstance(exc, asyncio.TimeoutError)
+                            else str(exc) or type(exc).__name__
+                        )
                         logger.warning(
                             "event=warmup_resource_attempt_failed resource=%s attempt=%d total_attempts=%d error=%r",
                             wtask.provider.name, attempt, total, error,

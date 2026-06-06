@@ -423,6 +423,7 @@ async def test_task_timeout_marks_failed():
     pool = make_pool([WarmupTask(provider=p, timeout=0.05)])
     await pool.run_all()
     assert p._status is ResourceStatus.FAILED
+    assert p._error == "timed out after 0.05s"
     assert p._done.is_set()
 
 

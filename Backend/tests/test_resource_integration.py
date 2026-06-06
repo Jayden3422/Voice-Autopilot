@@ -83,6 +83,69 @@ async def test_async_synthesis_waits_for_piper_provider(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_piper_provider_passes_use_cuda_as_keyword(monkeypatch, tmp_path):
+    from resources.piper import PiperProvider
+
+    model_path = tmp_path / "voice.onnx"
+    load_args = {}
+
+    class FakeVoice:
+        @staticmethod
+        def load(path, config_path=None, use_cuda=False):
+            load_args.update(
+                path=path,
+                config_path=config_path,
+                use_cuda=use_cuda,
+            )
+            return SimpleNamespace(synthesize=lambda _text: [object()])
+
+    monkeypatch.setitem(sys.modules, "piper", SimpleNamespace(PiperVoice=FakeVoice))
+    monkeypatch.setenv("PIPER_EN_MODEL", str(model_path))
+
+    await PiperProvider("en")._load()
+
+    assert load_args == {
+        "path": str(model_path),
+        "config_path": None,
+        "use_cuda": False,
+    }
+
+
+def test_piper_disables_g2pw_graph_optimization(monkeypatch):
+    from resources.piper import _load_chinese_phonemizer
+
+    optimization_levels = []
+
+    class SessionOptions:
+        graph_optimization_level = "enable_all"
+
+    class FakeOrt:
+        class GraphOptimizationLevel:
+            ORT_DISABLE_ALL = "disable_all"
+
+        @staticmethod
+        def InferenceSession(_path, sess_options=None):
+            optimization_levels.append(sess_options.graph_optimization_level)
+            return object()
+
+    class FakeG2PWConverter:
+        def __init__(self):
+            options = SessionOptions()
+            options.graph_optimization_level = "enable_all"
+            FakeOrt.InferenceSession("g2pw.onnx", sess_options=options)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "g2pw.api",
+        SimpleNamespace(onnxruntime=FakeOrt),
+    )
+
+    _load_chinese_phonemizer(FakeG2PWConverter)
+
+    assert optimization_levels == ["disable_all"]
+
+
+@pytest.mark.asyncio
 async def test_retrieve_waits_for_faiss_provider(monkeypatch, tmp_path):
     import resources
     from rag import retrieve as retrieve_module

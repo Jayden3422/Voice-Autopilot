@@ -102,7 +102,13 @@ export function useAudioPlayback({ lang }) {
     try {
       if (TTS_MODE === "browser") { await speakWithBrowserTTS(text); return; }
       if (TTS_MODE === "backend") {
-        try { await requestBackendTTS(text); } catch (err) { console.error("Backend TTS failed:", err); }
+        try {
+          const ok = await requestBackendTTS(text);
+          if (ok) return;
+        } catch (err) {
+          console.error("Backend TTS failed:", err);
+        }
+        await speakWithBrowserTTS(text);
         return;
       }
       if (TTS_MODE === "auto") {
